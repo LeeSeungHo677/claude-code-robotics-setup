@@ -1,0 +1,179 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(tree *)",
+      "Bash(file *)",
+      "Bash(stat *)",
+      "Bash(du *)",
+      "Bash(df *)",
+      "Bash(diff *)",
+      "Bash(sort *)",
+      "Bash(uniq *)",
+      "Bash(jq *)",
+      "Bash(realpath *)",
+      "Bash(basename *)",
+      "Bash(dirname *)",
+      "Bash(which *)",
+      "Bash(pwd *)",
+      "Bash(whoami *)",
+      "Bash(uname *)",
+      "Bash(date *)",
+      "Bash(echo *)",
+      "Bash(printenv *)",
+      "Bash(* --version)",
+      "Bash(* --help *)",
+      "Bash(git status *)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git show *)",
+      "Bash(git blame *)",
+      "Bash(git remote -v *)",
+      "Bash(git describe *)",
+      "Bash(git rev-parse *)",
+      "Bash(git ls-files *)",
+      "Bash(git stash list *)",
+      "Bash(git branch)",
+      "Bash(git branch -a *)",
+      "Bash(git branch -v *)",
+      "Bash(git branch --show-current *)",
+      "Bash(ros2 topic list *)",
+      "Bash(ros2 topic info *)",
+      "Bash(ros2 topic type *)",
+      "Bash(ros2 topic hz *)",
+      "Bash(ros2 topic bw *)",
+      "Bash(ros2 topic echo *)",
+      "Bash(ros2 node list *)",
+      "Bash(ros2 node info *)",
+      "Bash(ros2 param list *)",
+      "Bash(ros2 param get *)",
+      "Bash(ros2 param dump *)",
+      "Bash(ros2 service list *)",
+      "Bash(ros2 service type *)",
+      "Bash(ros2 action list *)",
+      "Bash(ros2 action info *)",
+      "Bash(ros2 interface show *)",
+      "Bash(ros2 interface list *)",
+      "Bash(ros2 interface proto *)",
+      "Bash(ros2 pkg list *)",
+      "Bash(ros2 pkg prefix *)",
+      "Bash(ros2 pkg xml *)",
+      "Bash(ros2 doctor *)",
+      "Bash(ros2 daemon status *)",
+      "Bash(ros2 bag info *)",
+      "Bash(ros2 bag list *)",
+      "Bash(colcon list *)",
+      "Bash(colcon build *)",
+      "Bash(colcon test *)",
+      "Bash(colcon test-result *)",
+      "Bash(pytest *)",
+      "Bash(python3 -m pytest *)",
+      "Bash(python -m pytest *)",
+      "Bash(python3 -m venv *)",
+      "Bash(pip list *)",
+      "Bash(pip show *)",
+      "Bash(pip freeze *)",
+      "Bash(uv pip list *)",
+      "Bash(uv pip show *)",
+      "Bash(uv sync *)",
+      "Bash(uv lock *)",
+      "Bash(ruff check *)",
+      "Bash(ruff format --check *)",
+      "Bash(mypy *)",
+      "Bash(npm run build *)",
+      "Bash(npm run test *)",
+      "Bash(npm run lint *)",
+      "Bash(npm test *)",
+      "Bash(npm ls *)",
+      "Bash(npx tsc --noEmit *)",
+      "Bash(docker ps *)",
+      "Bash(docker images *)",
+      "Bash(docker logs *)",
+      "Bash(docker inspect *)",
+      "Bash(docker compose ps *)",
+      "Bash(docker compose logs *)"
+    ],
+    "deny": [
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/credentials)",
+      "Read(~/.claude/.credentials.json)",
+      "Read(~/.config/gcloud/**)",
+      "Read(~/.docker/config.json)",
+      "Read(~/.netrc)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(sudo *)",
+      "Bash(ros2 run *)",
+      "Bash(ros2 launch *)",
+      "Bash(ros2 topic pub *)",
+      "Bash(ros2 param set *)",
+      "Bash(ros2 param load *)",
+      "Bash(ros2 service call *)",
+      "Bash(ros2 action send_goal *)",
+      "Bash(ros2 lifecycle set *)",
+      "Bash(ros2 bag record *)",
+      "Bash(ros2 bag play *)",
+      "Bash(ros2 bag convert *)",
+      "Bash(docker run *)",
+      "Bash(docker rm *)",
+      "Bash(docker rmi *)",
+      "Bash(docker compose down *)"
+    ],
+    "defaultMode": "auto"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/dangerous-command-guard.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/secret-scanner.py\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/ros2-workspace-guard.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/session-context.py\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/version-watch.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "alwaysThinkingEnabled": true
+}

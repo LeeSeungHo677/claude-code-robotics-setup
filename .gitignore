@@ -1,0 +1,36 @@
+# 이 저장소에는 세팅의 "구성" 만 들어간다.
+# 대화 기록·자격증명·런타임 상태는 ~/.claude 에만 있고 여기로 오지 않는다.
+# 아래는 실수로 복사됐을 때를 대비한 2차 방어선이다.
+
+# 자격증명 / 런타임 상태
+.credentials.json
+history.jsonl
+settings.local.json
+*.local.md
+.version-seen
+.last-*
+daemon*
+sessions/
+ide/
+session-env/
+shell-snapshots/
+paste-cache/
+file-history/
+projects/
+todos/
+tasks/
+jobs/
+plans/
+cache/
+backups/
+
+# 파이썬
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 편집기 / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
