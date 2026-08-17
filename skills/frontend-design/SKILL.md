@@ -13,6 +13,9 @@ license: Complete terms in LICENSE.txt
 > `design-system`(척도·토큰·정밀함)과 `ui-ux-design`(정보구조·상태·알람)을 따른다.
 > 다만 "generic AI aesthetics 회피"(system-ui/Inter 탈출, 의도적 폰트·색 선택)는
 > **모든 화면에 적용된다.**
+>
+> 모션 연출·3D·스크롤 인터랙션용 스킬을 따로 설치했다면 **그것도 같은 범위**다 —
+> 소개·랜딩·데모에 쓰고, 관제 화면에는 열지 않는다.
 
 This skill guides creation of distinctive, production-grade frontend interfaces that avoid generic "AI slop" aesthetics. Implement real working code with exceptional attention to aesthetic details and creative choices.
 
