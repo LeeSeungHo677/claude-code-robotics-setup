@@ -12,14 +12,16 @@ description: >
 로봇 기술은 계속 바뀐다. 세팅이 한 번 만들고 방치되면 **틀린 지식을 자신 있게 말하는
 상태**가 되어 없느니만 못해진다. 이 문서는 그것을 막는 절차다.
 
-전체 구성 내역·출처·라이선스는 **`~/.claude/MANIFEST.md`** 에 있다. 무엇을 바꾸든 먼저 읽는다.
+구성 내역·출처·라이선스·판단 근거는 **`~/.claude/MANIFEST.md`** 에 기록해 둔다.
+이 배포판에는 포함되지 않는다 — 자기 세팅의 이력이라 각자 만들어 쌓는 파일이다.
+있다면 무엇을 바꾸든 먼저 읽는다.
 
 ## 구조
 
 ```
 ~/.claude/
 ├── CLAUDE.md            매 세션 로드. 짧게 유지한다 (규칙만, 지식은 스킬로)
-├── MANIFEST.md          구성 내역·출처·미적용 항목
+├── MANIFEST.md          구성 내역·출처·미적용 항목 (직접 만들어 쌓는다)
 ├── settings.json        권한(allow/ask/deny) + 훅 등록
 ├── skills/<name>/SKILL.md    지식 본체. 호출될 때만 로드 → 개수 제한 없음
 │   └── references/*.md       큰 스킬은 라우터 + references 로 분리
@@ -91,7 +93,7 @@ description: >
 ## 훅 작성 규칙 — 여기서 실수하면 조용히 무동작한다
 
 - **입력은 stdin JSON 이다.** `process.argv` / `sys.argv` 가 아니다.
-  (외부 레포 훅의 흔한 결함. `MANIFEST.md` 참고)
+  외부 레포에서 가져온 훅이 이걸 틀려 조용히 무동작하는 경우가 많다 — 가져오기 전에 확인한다.
 - 차단 출력:
   ```json
   {"hookSpecificOutput": {"hookEventName": "PreToolUse",
