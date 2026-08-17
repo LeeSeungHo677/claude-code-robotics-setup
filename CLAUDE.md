@@ -38,7 +38,7 @@
 - 성능·성공률은 **N회 측정치**로 말한다. 1회 성공은 근거가 아니다.
 
 이 세팅(`~/.claude`) 자체를 고치거나 스킬·에이전트·훅을 추가할 때는
-`setup-maintenance` 스킬을 먼저 연다. 구성 내역은 `~/.claude/MANIFEST.md`.
+`setup-maintenance` 스킬을 먼저 연다. 무엇을 왜 바꿨는지는 `~/.claude/MANIFEST.md` 에 기록한다.
 
 ## 응답 언어
 
