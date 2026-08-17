@@ -55,13 +55,13 @@ run mkdir -p "$CLAUDE_DIR"
 
 # ── 1) 기존 구성 백업 ────────────────────────────────────────────────────────
 NEED_BACKUP=0
-for d in skills agents commands hooks CLAUDE.md; do
+for d in skills agents commands hooks bin CLAUDE.md; do
   [ -e "$CLAUDE_DIR/$d" ] && NEED_BACKUP=1
 done
 if [ "$NEED_BACKUP" = 1 ]; then
   say "── 기존 구성 백업 → $BACKUP"
   run mkdir -p "$BACKUP"
-  for d in skills agents commands hooks CLAUDE.md settings.json; do
+  for d in skills agents commands hooks bin CLAUDE.md settings.json; do
     [ -e "$CLAUDE_DIR/$d" ] && run cp -a "$CLAUDE_DIR/$d" "$BACKUP/"
   done
   say ""
@@ -69,7 +69,9 @@ fi
 
 # ── 2) 구성 설치 ─────────────────────────────────────────────────────────────
 say "── 구성 설치"
-for d in skills agents commands hooks; do
+# bin/ 은 세션 시작 배너가 경로로 안내하는 스크립트가 들어 있다.
+# 빼면 배너가 없는 파일을 광고하게 된다.
+for d in skills agents commands hooks bin; do
   if [ "$MODE" = link ]; then
     run rm -rf "$CLAUDE_DIR/$d"
     run ln -s "$SRC/$d" "$CLAUDE_DIR/$d"
@@ -81,7 +83,7 @@ for d in skills agents commands hooks; do
     say "  복사  $d/"
   fi
 done
-run chmod +x "$CLAUDE_DIR"/hooks/*.py
+run chmod +x "$CLAUDE_DIR"/hooks/*.py "$CLAUDE_DIR"/bin/*.py
 
 # CLAUDE.md — 있으면 덮어쓰지 않는다. 개인 규칙이 들어 있는 파일이다.
 if [ -e "$CLAUDE_DIR/CLAUDE.md" ]; then
@@ -127,6 +129,13 @@ if os.path.isfile(sp):
                     print("  ✗ 훅 없음: %s" % p); ok = False
     print("  훅 경로 확인 완료")
 
+# 세션 시작 배너가 경로로 안내하는 스크립트 — 없으면 배너가 유령을 광고한다
+tree = os.path.join(d, "bin", "setup-tree.py")
+if not os.path.isfile(tree):
+    print("  ✗ bin/setup-tree.py 없음 (배너가 이 경로를 안내합니다)"); ok = False
+else:
+    print("  bin/setup-tree.py 확인 완료")
+
 print("  skills   %d" % len(glob.glob(os.path.join(d, "skills", "*", "SKILL.md"))))
 print("  agents   %d" % len(glob.glob(os.path.join(d, "agents", "*.md"))))
 print("  commands %d" % len(glob.glob(os.path.join(d, "commands", "*", "*.md"))))
@@ -134,9 +143,9 @@ sys.exit(0 if ok else 1)
 PY
 
 say ""
-say "── 훅 테스트 (98종)"
+say "── 테스트"          # 개수는 박지 않는다 — 늘 때마다 낡는다
 fail=0
-for t in "$CLAUDE_DIR"/hooks/test_*.py; do
+for t in "$CLAUDE_DIR"/hooks/test_*.py "$CLAUDE_DIR"/bin/test_*.py; do
   [ -e "$t" ] || continue
   if out=$(python3 "$t" 2>&1); then
     say "  PASS  $(basename "$t")  $(printf '%s' "$out" | tail -1)"
@@ -144,7 +153,7 @@ for t in "$CLAUDE_DIR"/hooks/test_*.py; do
     say "  FAIL  $(basename "$t")"; printf '%s\n' "$out" | tail -5; fail=1
   fi
 done
-rm -rf "$CLAUDE_DIR/hooks/__pycache__"
+rm -rf "$CLAUDE_DIR/hooks/__pycache__" "$CLAUDE_DIR/bin/__pycache__"
 
 say ""
 if [ "$fail" = 0 ]; then

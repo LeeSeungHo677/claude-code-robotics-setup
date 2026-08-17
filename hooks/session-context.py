@@ -22,6 +22,7 @@ import os
 import re
 import subprocess
 import sys
+import unicodedata
 
 HOME = os.path.expanduser("~")
 USER_SKILLS = os.path.join(HOME, ".claude", "skills")
@@ -40,47 +41,205 @@ def _count(path, pat=None):
         return 0
 
 
-def cheatsheet(cwd, reco, dom):
-    """켜자마자 보여주는 실행 사용법. 개수는 박아두지 않고 그때 센다.
+# ─────────────────────────── 배너 렌더링 ───────────────────────────
+# 훅에는 tty 가 없어 터미널 폭을 알 수 없다(shutil.get_terminal_size → 0).
+# 고정 폭으로 그리되 좁은 창에서 접히지 않게 보수적으로 잡는다.
+BANNER_W = 70
 
-    systemMessage 로 나가므로 사용자 화면용이다. 프로젝트 감지·git 상태 같은
-    Claude 용 정보는 여기 넣지 않는다 (그건 additionalContext 쪽)."""
-    ns = _count(os.path.join(HOME, ".claude", "skills"))
-    ns += _count(os.path.join(cwd, ".claude", "skills"))
-    na = len([f for f in os.listdir(os.path.join(HOME, ".claude", "agents"))
-              if f.endswith(".md")]) if os.path.isdir(os.path.join(HOME, ".claude", "agents")) else 0
-    nc = _count(os.path.join(HOME, ".claude", "commands"), "md")
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+_PLAIN = bool(os.environ.get("CLAUDE_BANNER_PLAIN") or os.environ.get("NO_COLOR"))
 
-    # 위 [에이전트] 절에 이미 나온 것은 빼고, 이 디렉토리에만 있는 것을 보여준다
-    shown = ("ros2-reviewer", "robot-safety-reviewer", "robotics-architect", "Explore")
-    extra = [r for r in reco if not any(s in r for s in shown)]
-    here = " · ".join(extra) if extra else "(전용 커맨드 없음)"
-    return "\n".join([
-        f"━━ Claude 풀 세팅 ━━ 스킬 {ns} · 에이전트 {na} · 커맨드 {nc} ━━━━━━━━━━━━━━━",
-        "[스킬] 부르지 않는다. 하려는 일을 말하면 열린다.",
-        '   "논문 제대로 리뷰해줘"→paper-review   "이 레포 쓸만해?"→repo-review',
-        '   "옵시디언 노트 검토"→notes-review     "빌드가 안 돼"→ros2-setup',
-        '   "시뮬과 실기가 다른데"→sim-to-real-check  "보상함수"→rl-training',
-        f"   이 레포에 맞는 스킬: {' · '.join(dom) if dom else '(자동 매칭 없음)'}",
-        "[에이전트] 이름을 불러야 온다.",
-        "   ros2-reviewer          PR 전·실기 투입 전 코드 리뷰",
-        "   robot-safety-reviewer  실기 투입·납품 전, 안전 관련 변경 후",
-        "   robotics-architect     처음 보는 워크스페이스 구조 파악",
-        "   Explore                넓게 훑고 결론만 받을 때",
-        "[커맨드]",
-        "   /setup:guide 사용법  /setup:audit 점검  /setup:tech-scan 신기술",
-        "   /robot:preflight 실기 전  /robot:diagnose  /robot:bag-analyze",
-        "   /git:pr-create  /git:worktree  /workflow:orchestrate",
-        f"   여기서: {here}",
-        "[하네스]",
-        "   긴 명령은 백그라운드로 — colcon build·학습 (120초에 안 잘림)",
-        "   /rewind 되돌리기 · /resume 세션복구 · /compact 압축 · /model 모델",
-        "[루프]",
-        "   Monitor  빌드·로그 감시 — 실패 시그니처를 걸어야 크래시를 잡는다",
-        "   cron     매일 06:00 논문 수집 → ~/knowledge/papers",
-        "[지식] ~/knowledge — 논문·리뷰·로봇분석. 레포 안에 넣지 않는다",
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-    ])
+
+def _c(code, s):
+    """ANSI 색. CLAUDE_BANNER_PLAIN=1 또는 NO_COLOR 가 있으면 평문으로 떨어진다.
+    색이 깨지는 터미널에서 되돌릴 수단을 남겨둔다."""
+    return s if _PLAIN or not s else f"\x1b[{code}m{s}\x1b[0m"
+
+
+def _w(s):
+    """화면 폭. 한글·CJK 는 2칸으로 센다.
+    공백으로 수동 정렬하면 한글 줄에서 반드시 어긋나는데, 그걸 막는 유일한 지점이다."""
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1
+               for c in _ANSI.sub("", s))
+
+
+def _pad(s, n):
+    return s + " " * max(0, n - _w(s))
+
+
+def _clip(s, n):
+    """폭 n 으로 자른다. 넘치면 … 를 붙인다 (색 코드 없는 평문 전용)."""
+    out, w = [], 0
+    for ch in s:
+        cw = 2 if unicodedata.east_asian_width(ch) in "WF" else 1
+        if w + cw > n - 1:
+            return "".join(out) + "…"
+        out.append(ch)
+        w += cw
+    return "".join(out)
+
+
+def _dim(s):    return _c("2", s)
+def _bold(s):   return _c("1", s)
+def _cyan(s):   return _c("36", s)
+def _green(s):  return _c("32", s)
+def _yellow(s): return _c("33", s)
+
+
+# 트리 도식으로 그린다. 닫힌 박스(╭─┐)는 첫 줄에 붙는 'SessionStart:… says:'
+# 프리픽스와 좁은 터미널에서 깨지지만, 왼쪽 레일만 쓰는 트리는 안 깨진다.
+RAIL = "│"
+INDENT = 4          # 레일 다음 들여쓰기
+LW = 12             # 라벨 컬럼 폭. 가장 긴 라벨('백그라운드' 10칸)보다 넓어야 한다
+
+
+def _row(label, value, lw=LW):
+    """레일 + 라벨 + 값. 라벨 폭을 화면 폭 기준으로 맞춘다 (한글이 섞여도 정렬된다)."""
+    return _dim(RAIL) + " " * INDENT + _pad(_cyan(label), lw) + value
+
+
+def _wrap(label, items, lw=LW, sep=" · "):
+    """items 를 화면 폭 안에서 접어 여러 줄로 만든다.
+
+    폭 계산을 손으로 하지 않기 위한 것이다 — 아래 문구를 나중에 고쳐도 줄이
+    넘치지 않는다. 한글이 섞이면 손계산은 반드시 틀린다(실제로 5줄이 넘쳤다)."""
+    avail = BANNER_W - 1 - INDENT - lw
+    lines, cur = [], []
+    for it in items:
+        if cur and _w(sep.join(cur + [it])) > avail:
+            lines.append(sep.join(cur))
+            cur = [it]
+        else:
+            cur.append(it)
+    if cur:
+        lines.append(sep.join(cur))
+    return [_row(label if i == 0 else "", ln, lw) for i, ln in enumerate(lines)]
+
+
+def _unrail(s):
+    """마지막 가지의 본문은 세로줄이 끝났으므로 레일을 지운다.
+    색 코드가 앞에 붙으므로 startswith 로는 못 잡는다 — 첫 등장 위치를 찾는다."""
+    i = s.find(RAIL)
+    return s[:i] + " " + s[i + 1:] if i >= 0 else s
+
+
+# 배너에 이름으로 등장하는 것들. 실재 여부를 테스트가 전수 검사한다
+# (예전에 없는 `ros2-setup` 을 매 세션 광고하고 있었다).
+SAY_EXAMPLES = [
+    ('"논문 제대로 리뷰해줘"', "paper-review"),
+    ('"시뮬과 실기가 다른데"', "sim-to-real-check"),
+    ('"QoS 가 안 맞아"', "ros2-engineering"),
+    ('"보상함수 설계"', "rl-training"),
+    ('"이 레포 쓸만해?"', "repo-review"),
+]
+CALL_AGENTS = [
+    ("ros2-reviewer", "PR 전"),
+    ("robot-safety-reviewer", "실기 전"),
+    ("robotics-architect", "구조 파악"),
+    ("Explore", "넓게 훑기"),          # 내장 에이전트 — 파일이 없다
+]
+CALL_CMDS = [
+    ("/setup:guide", "사용법"), ("/setup:audit", "점검"),
+    ("/robot:preflight", "실기 전"), ("/robot:diagnose", "진단"),
+    ("/git:pr-create", "PR"), ("/workflow:orchestrate", "다단계"),
+]
+
+
+def banner(f):
+    """켜자마자 보이는 화면. systemMessage 로 나가고 Claude 컨텍스트에도 들어간다.
+
+    그래서 정적 목록을 늘리지 않는다 — 늘려야 할 것은 **지금 이 레포에서 달라지는
+    정보**(브랜치·변경 수·매칭된 스킬)뿐이다. 박제된 문구는 낡고 비용만 낸다."""
+    ns, na, nc, unused = f["counts"]
+    rule = _dim("━" * BANNER_W)
+    L = ["", rule]
+
+    # ── 상태 줄: 어디서 · 어떤 상태로 켰는지 ──────────────────────────
+    head = " " + _bold(_clip(f["repo"], 28))
+    if f["branch"]:
+        state = _green("clean") if not f["dirty"] else _yellow(f"변경 {f['dirty']}")
+        head += "  " + _cyan(f["branch"]) + " " + state
+    right = _dim(f"스킬 {ns} · 에이전트 {na} · 커맨드 {nc} ")
+    L.append(_pad(head, BANNER_W - _w(right)) + right)
+
+    env = list(f["stack"])
+    if f["ros"]:
+        env.append(f["ros"])
+    if env:
+        L.append(" " + _dim(_clip(" · ".join(env), BANNER_W - 2)))
+    if f["last"]:
+        L.append(" " + _dim("↳ " + _clip(f["last"], BANNER_W - 4)))
+    L.append(rule)
+
+    # 섹션을 (제목, 곁말, 본문) 으로 모아 두고 마지막에 가지를 그린다 —
+    # 매칭이 없어 섹션이 통째로 비면 └─ 위치가 달라진다.
+    secs = []
+
+    # ── 이 레포에 자동 매칭된 것 ─────────────────────────────────────
+    body = []
+    skills = f["dom"] + [n for k, n, _ in f["reco"] if k == "skill" and n not in f["dom"]]
+    agents = [(n, why) for k, n, why in f["reco"] if k == "agent"]
+    cmds = [f"/{n}" for k, n, _ in f["reco"] if k == "cmd"]
+    if skills:
+        body += _wrap("스킬", [_cyan(s) for s in skills[:4]])
+    for i, (n, why) in enumerate(agents[:3]):
+        body.append(_row("에이전트" if i == 0 else "", _pad(_cyan(n), 24) + _dim(why)))
+    if cmds:
+        body.append(_row("커맨드", " · ".join(_cyan(c) for c in cmds)))
+    if not body:
+        body.append(_row("", _dim("자동 매칭 없음 — 그냥 하려는 일을 말하면 된다")))
+    secs.append(("이 레포에서 바로", "", body))
+
+    # ── 부르는 법 ───────────────────────────────────────────────────
+    # 예시는 한 줄에 하나씩, 화살표를 세로로 맞춘다 — 붙여 쓰면 어느 말이 어느
+    # 스킬을 여는지 눈으로 짚기 어렵다.
+    body = []
+    cw = max(_w(say) for say, _ in SAY_EXAMPLES) + 2
+    for i, (say, sk) in enumerate(SAY_EXAMPLES):
+        body.append(_row("스킬" if i == 0 else "", _pad(say, cw) + _dim("→ ") + _cyan(sk)))
+    body += _wrap("에이전트", [f"{_cyan(n)} {_dim(why)}" for n, why in CALL_AGENTS])
+    body += _wrap("커맨드", [f"{_cyan(n)} {_dim(why)}" for n, why in CALL_CMDS])
+    secs.append(("부르는 법", "말하면 스킬이 열리고, 이름을 부르면 온다", body))
+
+    # ── 매번 까먹는 것 ───────────────────────────────────────────────
+    secs.append(("자주 잊는 것", "", [
+        _row("백그라운드", "colcon build · 학습 · rosbag " + _dim("→ 120초에 안 잘린다")),
+        _row("Monitor", "빌드·로그 감시 " + _dim("실패 시그니처를 걸어야 잡는다")),
+        _row("cron", (f"{f['ncron']}개 돌고 있다 " + _dim("/setup:tree 루프 로 확인")
+                      if f["ncron"] else _dim("등록된 것 없음"))),
+        _row("되돌리기", _cyan("/rewind") + _dim(" 되돌리기 · ") + _cyan("/resume")
+             + _dim(" 세션복구 · ") + _cyan("/compact") + _dim(" 압축")),
+        _row("지식", "~/knowledge " + _dim("논문·리뷰·로봇분석. 레포에 넣지 않는다")),
+    ]))
+
+    # ── 안 써본 스킬 하나 ────────────────────────────────────────────
+    if f["rot"]:
+        body = [_row("", _cyan(f["rot"][0]) + _dim(" — " + _clip(f["rot"][1], 44)))]
+        if unused:
+            body.append(_row("", _dim(f"아직 안 써본 스킬 {unused}개 중 하나")))
+        secs.append(("오늘 열어볼 것", "", body))
+
+    # ── 가지 그리기 ─────────────────────────────────────────────────
+    for si, (title, note, body) in enumerate(secs):
+        last = si == len(secs) - 1
+        L.append(_dim(RAIL))
+        L.append(_dim("└─ " if last else "├─ ") + _bold(title)
+                 + (_dim("   " + note) if note else ""))
+        L += [_unrail(b) for b in body] if last else body
+
+    # 꼬리말. `!` 직접 실행을 먼저 권하는 이유까지 적는다 — 이유를 안 적으면
+    # 그냥 /setup:tree 를 쓰게 되고, 그건 출력 전체가 모델 컨텍스트를 거친다.
+    tip = "! python3 ~/.claude/bin/setup-tree.py"
+    gap = " " * 11
+    L += [
+        rule,
+        " " + _pad(_cyan("전체 지도"), 11) + _bold(tip),
+        " " + gap + _dim("↳ 터미널에서 직접 실행 — 색이 살고 컨텍스트를 안 쓴다"),
+        " " + gap + _dim("↳ /setup:tree 도 같은 내용이지만 내가 읽어서 토큰을 쓴다"),
+        " " + _pad(_cyan("더 보기"), 11) + _cyan("/setup:guide")
+        + _dim(" 사용법 · ") + _cyan("/setup:audit") + _dim(" 세팅 점검"),
+    ]
+    return "\n".join(L)
 
 
 def run(cmd, cwd, timeout=3):
@@ -182,6 +341,7 @@ def _exists(kind, name, cwd):
 
 
 def recommend(cwd, stack):
+    """(kind, name, why) 로 돌려준다 — 배너와 컨텍스트가 표기를 각자 정하도록."""
     out, seen = [], set()
     for tag in stack:
         for key, items in RECO.items():
@@ -191,8 +351,12 @@ def recommend(cwd, stack):
                 if name in seen or not _exists(kind, name, cwd):
                     continue
                 seen.add(name)
-                out.append(f"/{name}" if kind == "cmd" else f"`{name}`({why})")
+                out.append((kind, name, why))
     return out[:5]
+
+
+def fmt_reco(reco):
+    return [f"/{n}" if k == "cmd" else f"`{n}`({why})" for k, n, why in reco]
 
 
 # 스택 태그 → 관련 스킬을 고르는 키워드. 로테이션이 엉뚱한 것을 권하지 않게 한다.
@@ -302,7 +466,14 @@ def rotation_skill(stack):
         if m >= 0:
             desc = " ".join(text[m + 12:].split("\n---")[0].split())
             desc = desc.lstrip(">|").strip()
-        return pick, desc[:70]
+            # description 뒤쪽의 TRIGGER/DO NOT TRIGGER 절은 검색용이지 사람이 읽을
+            # 문장이 아니다. 화면에 그대로 새면 잘린 영문 조각만 보인다.
+            for cut in ("TRIGGER", "DO NOT TRIGGER", "Use this skill", "Use when"):
+                i = desc.find(cut)
+                if i > 0:
+                    desc = desc[:i]
+            desc = desc.strip().rstrip(".·-— ")
+        return pick, desc[:70], len([n for n in names if n not in used])
     except Exception:
         return None
 
@@ -314,46 +485,63 @@ def main():
         data = {}
 
     cwd = data.get("cwd") or os.getcwd()
-    lines = []
 
     stack = detect_stack(cwd)
-    if stack:
-        lines.append(f"- 프로젝트 성격: {', '.join(stack)}")
+    reco = recommend(cwd, stack)
+    dom = domain_skills(cwd)
+    rot = rotation_skill(stack)
 
     branch = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd)
+    dirty, last = 0, ""
     if branch:
-        dirty = run(["git", "status", "--porcelain"], cwd)
-        n = len([l for l in dirty.split("\n") if l.strip()]) if dirty else 0
-        lines.append(f"- git: `{branch}` ({f'변경 {n}개' if n else 'clean'})")
+        d = run(["git", "status", "--porcelain"], cwd)
+        dirty = len([l for l in d.split("\n") if l.strip()]) if d else 0
         last = run(["git", "log", "-1", "--pretty=%s"], cwd)
-        if last:
-            lines.append(f"- 최근 커밋: {last[:90]}")
 
     distro = os.environ.get("ROS_DISTRO")
+    ros = ""
     if distro:
-        domain = os.environ.get("ROS_DOMAIN_ID", "0(기본)")
-        rmw = os.environ.get("RMW_IMPLEMENTATION", "기본")
-        lines.append(f"- ROS: {distro} / DOMAIN_ID={domain} / RMW={rmw}")
+        ros = (f"ROS {distro} · DOMAIN_ID {os.environ.get('ROS_DOMAIN_ID', '0(기본)')}"
+               f" · RMW {os.environ.get('RMW_IMPLEMENTATION', '기본')}")
 
-    reco = recommend(cwd, stack)
+    # cron 개수는 세지 않고 박아두면 낡는다 — 배너가 3개 중 1개만 안내하고 있었다
+    ncron = len([l for l in run(["crontab", "-l"], cwd).splitlines()
+                 if l.strip() and not l.lstrip().startswith("#")])
+
+    facts = {
+        "ncron": ncron,
+        "repo": os.path.basename(cwd.rstrip("/")) or cwd,
+        "stack": stack, "branch": branch, "dirty": dirty, "last": last,
+        "ros": ros, "reco": reco, "dom": dom,
+        "rot": (rot[0], rot[1]) if rot else None,
+        "counts": (
+            _count(os.path.join(HOME, ".claude", "skills")) + _count(os.path.join(cwd, ".claude", "skills")),
+            len([f for f in os.listdir(os.path.join(HOME, ".claude", "agents")) if f.endswith(".md")])
+            if os.path.isdir(os.path.join(HOME, ".claude", "agents")) else 0,
+            _count(os.path.join(HOME, ".claude", "commands"), "md"),
+            rot[2] if rot else 0,
+        ),
+    }
+
+    # Claude 컨텍스트용. 배너와 겹치지만 **기계가 틀리면 안 되는 사실**만 남긴다
+    # (배너는 화면 배치가 바뀔 수 있고, 추천 문구는 사람용이다).
+    lines = []
+    if stack:
+        lines.append(f"- 프로젝트 성격: {', '.join(stack)}")
+    if branch:
+        lines.append(f"- git: `{branch}` ({f'변경 {dirty}개' if dirty else 'clean'})")
+        if last:
+            lines.append(f"- 최근 커밋: {last[:90]}")
+    if ros:
+        lines.append(f"- {ros}")
     if reco:
-        lines.append(f"- 여기서 쓸 만한 것: {' · '.join(reco)}")
-
-    dom = domain_skills(cwd)
+        lines.append(f"- 여기서 쓸 만한 것: {' · '.join(fmt_reco(reco))}")
     if dom:
         lines.append(f"- 이 레포 도메인에 맞는 스킬: {', '.join(dom)}")
-
-    rot = rotation_skill(stack)
-    if rot:
-        lines.append(f"- 아직 안 써본 스킬: `{rot[0]}` — {rot[1]}")
-
     lines.append("- 세팅 전체 사용법: `/setup:guide`")
 
-    if len(lines) <= 1:
-        sys.exit(0)
-
     print(json.dumps({
-        "systemMessage": cheatsheet(cwd, reco, dom),
+        "systemMessage": banner(facts),
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
             "additionalContext": "## 세션 시작 컨텍스트 (자동 수집)\n" + "\n".join(lines),

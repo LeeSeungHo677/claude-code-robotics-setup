@@ -1,6 +1,6 @@
 ---
 name: error-detective
-description: Error tracking, stack trace analysis, reproduction step generation, and root cause identification
+description: 오류 추적 전담. 스택 트레이스 분석, 재현 절차 도출, 근본 원인 규명에 사용. 원인을 모르는 크래시나 간헐적 오류를 파고들 때. 현장 로봇 사고 조사는 incident-analysis 스킬.
 tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
 ---
 

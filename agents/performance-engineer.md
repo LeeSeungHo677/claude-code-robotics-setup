@@ -1,6 +1,6 @@
 ---
 name: performance-engineer
-description: Profiling, benchmarking, memory analysis, load testing, and optimization patterns
+description: 성능 최적화 전담. 프로파일링·벤치마크·메모리 분석·부하 테스트로 병목을 측정해서 제거할 때 사용. 추측으로 고치지 않는다. 로봇 온보드(제어 주기·지터·열)는 robot-perf-engineer.
 tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
 ---
 
