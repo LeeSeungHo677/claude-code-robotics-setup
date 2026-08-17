@@ -1,6 +1,6 @@
 ---
 name: test-architect
-description: Testing strategy with unit/integration/e2e, TDD, property-based testing, and mutation testing
+description: 테스트 설계 전담. 무엇을 어느 계층(단위·통합·E2E)에서 검증할지 정하고, TDD 사이클·속성 기반 테스트·뮤테이션 테스트로 테스트 자체의 실효성을 점검할 때 사용. ROS 노드 테스트는 robotics-testing 스킬.
 tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
 ---
 

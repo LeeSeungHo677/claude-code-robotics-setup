@@ -21,8 +21,9 @@ bilingual, so skill routing works with English prompts too.</sub>
 |---|---|---|
 | **skills/** 86 | ROS 2·Nav2·SLAM·매니퓰레이션·인지/학습·시뮬·안전·플릿 운영 + 웹/백엔드/인프라 | 필요할 때만 (개수가 늘어도 비용 없음) |
 | **agents/** 14 | `ros2-reviewer` `robot-safety-reviewer` `robotics-architect` 등 | 이름을 불러야 옴 |
-| **commands/** 46 | `/robot:diagnose` `/robot:preflight` `/ros2:new-node` `/setup:audit` … | 슬래시로 호출 |
-| **hooks/** 5 | 위험 명령 차단, 시크릿 차단, colcon 생성물 편집 차단, 세션 컨텍스트 주입, 버전 감시 | 매 도구 호출 |
+| **commands/** 47 | `/robot:diagnose` `/robot:preflight` `/ros2:new-node` `/setup:tree` … | 슬래시로 호출 |
+| **hooks/** 5 | 위험 명령 차단, 시크릿 차단, colcon 생성물 편집 차단, 세션 시작 배너, 버전 감시 | 매 도구 호출 |
+| **bin/** | `setup-tree.py` — 세팅 전체를 tree 도식으로 (터미널에서 직접 실행) | 부를 때만 |
 | **CLAUDE.md** | 항상 지켜야 하는 규칙 (반론 제기, 실기/시뮬 구분, 계층별 진단 순서 …) | 매 세션 |
 
 로봇 쪽에서 특히 손이 많이 간 스킬:
@@ -142,8 +143,27 @@ cp -a ~/.claude/backups/pre-install-<타임스탬프>/. ~/.claude/
 /robot:preflight    실기 투입 전 점검
 /robot:bag-analyze  rosbag 분석
 /robot:tuning-log   파라미터 튜닝 기록·비교
+/setup:tree         무엇이 있는지 전체 도식 (스킬 카테고리·에이전트·커맨드·훅)
 /setup:audit        이 세팅 자체의 구조·참조 무결성 점검
 ```
+
+### 4. 무엇이 있는지 보기 — `bin/setup-tree.py`
+
+스킬이 86개라 목록만으로는 안 잡힌다. 카테고리별 트리로 본다.
+
+```bash
+python3 ~/.claude/bin/setup-tree.py            # 전체 (약 110줄)
+python3 ~/.claude/bin/setup-tree.py 캘리브레이션 # 이름·설명에 걸리는 것만
+python3 ~/.claude/bin/setup-tree.py -d         # 스킬마다 설명 한 줄까지
+python3 ~/.claude/bin/setup-tree.py --check    # 분류표 ↔ 디스크 대조
+```
+
+Claude 안에서는 `/setup:tree` 로도 같은 것이 나오지만, **그냥 훑어볼 거면
+터미널에서 직접 실행하는 쪽이 낫다** — 색이 살아 있고 출력이 모델 컨텍스트를
+거치지 않는다. 세션 시작 배너도 이 명령을 이유와 함께 안내한다.
+
+스킬을 직접 추가하면 `미분류` 그룹에 모여서 보인다. 정상이고 `--check` 도 통과한다.
+제자리에 넣으려면 `bin/setup-tree.py` 의 `SKILL_GROUPS` 에 이름을 추가하면 된다.
 
 ---
 

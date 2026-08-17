@@ -1,6 +1,6 @@
 ---
 name: security-auditor
-description: OWASP Top 10, dependency scanning, secrets detection, and penetration testing guidance
+description: 보안 감사 전담. OWASP Top 10 점검, 의존성 취약점 스캔, 시크릿 노출 탐지, 공격자 관점 검토에 사용. 로봇·DDS·플릿 보안은 robotics-security 스킬.
 tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
 ---
 

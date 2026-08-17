@@ -1,6 +1,6 @@
 ---
 name: research-analyst
-description: Conducts structured technical research with systematic literature review, evidence synthesis, and actionable findings
+description: 기술 조사 전담. 여러 출처를 체계적으로 훑어 근거의 질을 평가하고, 확립된 합의와 추측을 구분해 결론을 낼 때 사용. 논문 한 편을 정독하는 것은 paper-review 스킬.
 tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
 ---
 
