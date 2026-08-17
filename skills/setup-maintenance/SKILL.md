@@ -122,9 +122,27 @@ description: >
 ```bash
 cd ~/.claude
 # 1) settings.json 유효성 + 훅 경로 존재
-python3 -c "import json,os;d=json.load(open('settings.json'));\
-[print(('OK ' if os.path.exists(h['command'].split()[-1]) else 'MISSING '),h['command'])\
- for ev in d['hooks'].values() for g in ev for h in g['hooks']]"
+python3 -c "
+import json, os, re, shlex
+d = json.load(open('settings.json'))
+ok = miss = skip = 0
+for ev, groups in d.get('hooks', {}).items():
+    for g in groups:
+        for h in g.get('hooks', []):
+            cmd = h.get('command', '')
+            # 셸 제어문이 섞인 인라인 훅(외부 도구가 심어놓은 형태)은 경로 검사 대상이 아니다.
+            # 마지막 토큰이 경로가 아니라서 검사하면 무조건 오탐이 난다.
+            if re.search(r'(^|\s)(if|case|for|while)\s', cmd) or re.search(r'[;|&]', cmd):
+                print('  SKIP    ', ev, '(인라인 셸)'); skip += 1; continue
+            try:
+                # 환경변수 확장 필수 — settings.json 은 HOME 을 리터럴로 담고 있다
+                p = os.path.expandvars(shlex.split(cmd)[-1])
+            except ValueError:
+                print('  SKIP    ', ev, '(파싱 불가)'); skip += 1; continue
+            print(('  OK      ' if os.path.exists(p) else '  MISSING '), ev, p)
+            ok, miss = (ok + 1, miss) if os.path.exists(p) else (ok, miss + 1)
+print('훅', ok + miss + skip, '개 — OK', ok, '/ MISSING', miss, '/ SKIP', skip)
+"
 
 # 2) 스킬 프론트매터 전수 파싱
 python3 -c "
