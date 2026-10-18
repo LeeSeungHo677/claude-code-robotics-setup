@@ -210,7 +210,10 @@ def banner(f):
         _row("되돌리기", _cyan("/rewind") + _dim(" 되돌리기 · ") + _cyan("/resume")
              + _dim(" 세션복구 · ") + _cyan("/compact") + _dim(" 압축")),
         _row("지식", "~/knowledge " + _dim("논문·리뷰·로봇분석. 레포에 넣지 않는다")),
-    ]))
+    ] + ([_row("REA", _green("이 세션에 붙어 있다") + _dim(" — 결과는 notes/ 에 동작 설명으로"))]
+         if f.get("rea") == "on" else
+         [_row("REA", _cyan("claude-rea") + _dim(" 로 따로 켠다 — 그냥 claude 에선 안 붙는다"))]
+         if f.get("rea") == "off" else [])))
 
     # ── 안 써본 스킬 하나 ────────────────────────────────────────────
     if f["rot"]:
@@ -566,8 +569,16 @@ def main():
     ncron = len([l for l in run(["crontab", "-l"], cwd).splitlines()
                  if l.strip() and not l.lstrip().startswith("#")])
 
+    # REA 는 ~/re-lab 에만 등록돼 있다(local scope). 폴더가 없으면 안내하지 않는다
+    rea_dir = os.path.join(HOME, "re-lab")
+    rea = None
+    if os.path.isdir(rea_dir):
+        real = os.path.realpath(cwd)
+        rea = "on" if real == rea_dir or real.startswith(rea_dir + os.sep) else "off"
+
     facts = {
         "ncron": ncron,
+        "rea": rea,
         "repo": os.path.basename(cwd.rstrip("/")) or cwd,
         "stack": stack, "branch": branch, "dirty": dirty, "last": last,
         "ros": ros, "reco": reco, "dom": dom,
