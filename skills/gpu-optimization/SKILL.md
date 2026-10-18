@@ -90,6 +90,8 @@ PyTorch → ONNX export → trtexec 로 엔진 빌드 → 런타임 로드
 - 열 스로틀링을 반드시 확인한다. 장시간 구동 시 성능이 떨어진다 (`tegrastats` 로 온도 기록).
 - DLA(딥러닝 가속기)가 있으면 일부 모델을 오프로드해 GPU 를 비울 수 있다.
   단 지원 연산이 제한적이다.
+- 기기 진단·메모리 튜닝 절차는 NVIDIA 의 [jetson-device-skills](https://github.com/NVIDIA-AI-IOT/jetson-device-skills)
+  (Apache-2.0)를 참고한다. 그 `install.sh` 는 `~/.claude/skills`·`agents` 에 symlink 를 거니 **그대로 돌리지 말고** 필요한 것만 골라 복사한다.
 - 전력 예산이 로봇 배터리와 직결된다. 성능만 보고 최대 모드로 두면 가동 시간이 준다.
 
 ## 직접 CUDA 커널을 쓸 때
