@@ -136,8 +136,10 @@ for ev, groups in d.get('hooks', {}).items():
                 print('  SKIP    ', ev, '(인라인 셸)'); skip += 1; continue
             try:
                 # 환경변수 확장 필수 — settings.json 은 HOME 을 리터럴로 담고 있다
-                p = os.path.expandvars(shlex.split(cmd)[-1])
-            except ValueError:
+                # 마지막 토큰은 인자일 수 있다(`bash x.sh session`) → '/' 가 든 마지막 토큰을 경로로 본다
+                paths = [t for t in shlex.split(cmd) if '/' in t]
+                p = os.path.expandvars(paths[-1])
+            except (ValueError, IndexError):
                 print('  SKIP    ', ev, '(파싱 불가)'); skip += 1; continue
             print(('  OK      ' if os.path.exists(p) else '  MISSING '), ev, p)
             ok, miss = (ok + 1, miss) if os.path.exists(p) else (ok, miss + 1)
@@ -148,7 +150,9 @@ print('훅', ok + miss + skip, '개 — OK', ok, '/ MISSING', miss, '/ SKIP', sk
 python3 -c "
 import os,yaml
 b='skills';bad=[]
-for d in sorted(os.listdir(b)):
+# synced/ 는 Claude Code 동기화 버킷(claude.ai 스킬 캐시) — SKILL.md 가 없는 게 정상
+dirs=[d for d in sorted(os.listdir(b)) if d!='synced']
+for d in dirs:
     p=os.path.join(b,d,'SKILL.md')
     if not os.path.isfile(p): bad.append((d,'no SKILL.md')); continue
     t=open(p,encoding='utf-8').read()
@@ -157,7 +161,7 @@ for d in sorted(os.listdir(b)):
     try:
         m=yaml.safe_load(t[4:e+1]); assert m.get('description')
     except Exception as x: bad.append((d,str(x)[:40]))
-print('스킬', len(os.listdir(b)), '개, 문제', len(bad)); [print(' ✗',*x) for x in bad]"
+print('스킬', len(dirs), '개, 문제', len(bad)); [print(' ✗',*x) for x in bad]"
 
 # 3) 에이전트 name == 파일명
 for a in agents/*.md; do n=$(grep -m1 '^name:' "$a"|sed 's/name: *//'); f=$(basename "$a" .md);
