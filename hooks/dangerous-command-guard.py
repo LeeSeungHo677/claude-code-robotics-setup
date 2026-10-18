@@ -61,6 +61,43 @@ def split_commands(cmd):
     return [p.strip() for p in parts if p.strip()]
 
 
+# ── heredoc 본문 제거 ────────────────────────────────────────────────────────
+# `cat > f <<'EOF' … EOF` 의 본문은 명령이 아니라 자료다. 개행에서 자르는 split_commands 가 본문 줄을
+# 명령으로 보고 안의 글자(sudo, rm -r …)에 걸리는 오탐을 막는다 (2026-10-11, PR 본문 쓰다 걸림).
+# 구분자에 따옴표가 없으면 본문 안의 $( )·` ` 는 셸이 확장하므로 그 치환 부분만 검사 대상으로 남긴다.
+# 종결자를 못 찾으면(가짜 heredoc, 예: echo "<<EOF" 뒤에 진짜 명령) 아무것도 떼지 않는다 — 우회 구멍이 되면 안 된다.
+HEREDOC_RE = re.compile(r"(?<![<\w])<<(?!<)(-?)\s*(?:'([^']+)'|\"([^\"]+)\"|\\?([A-Za-z_][\w]*))")
+
+
+def strip_heredocs(cmd):
+    lines = cmd.split("\n")
+    out, i = [], 0
+    while i < len(lines):
+        line = lines[i]
+        m = HEREDOC_RE.search(line)
+        out.append(line)
+        i += 1
+        if not m:
+            continue
+        dash, q1, q2, bare = m.groups()
+        word, quoted = (q1 or q2 or bare), bool(q1 or q2)
+        body, j, closed = [], i, False
+        while j < len(lines):
+            l = lines[j]
+            j += 1
+            if (l.lstrip("\t") if dash else l) == word:
+                closed = True
+                break
+            body.append(l)
+        if not closed:
+            continue                                   # 종결자 없음 → 본문으로 보지 않고 그대로 검사
+        if not quoted:
+            text = "\n".join(body)
+            out.extend(re.findall(r"\$\(([^()]*)\)", text) + re.findall(r"`([^`]*)`", text))
+        i = j
+    return "\n".join(out)
+
+
 # ── 규칙 ─────────────────────────────────────────────────────────────────────
 # (정규식, 사유)  — 정규식은 하위 명령 하나에 대해 적용된다.
 DENY_RULES = [
@@ -131,6 +168,7 @@ WHOLE_DENY_RULES = [
 
 
 def decide(command):
+    command = strip_heredocs(command)
     for rx, why in WHOLE_DENY_RULES:
         if rx.search(command):
             return "deny", why, command
