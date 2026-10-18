@@ -244,4 +244,5 @@ Use the smallest model that achieves acceptable quality. **비용은 호출당�
 - [ ] LLM output validated before downstream use
 - [ ] Embeddings cached to avoid redundant API calls
 - [ ] Agent loop has a step cap, repeated-call detection, and handles **every** `tool_use` block (tool errors returned as `is_error`, not thrown)
+- [ ] Routing/guardrail/judge steps that only need a choice or score: consider a decision-only model returning calibrated probabilities (e.g. TypeSafe Jev, early access since 2026-09). Calibrate the confidence threshold on your own labels, escalate below it, keep arithmetic in code. Typed output ≠ correct output; never in a robot control loop without a fallback
 - [ ] LLM-as-judge: measure agreement with 50–100 human labels before trusting it; re-measure when the judge prompt/model changes. Randomize pairwise order; don't let a model grade its own output

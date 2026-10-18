@@ -4,6 +4,8 @@ description: >
   프로덕션 ML 파이프라인 인프라. TRIGGER when the user sets up experiment tracking (MLflow, Weights & Biases),
   orchestrates training with Kubeflow/Airflow/Prefect DAGs, builds a feature store with Feast,
   versions data with DVC, deploys a model registry, or automates retraining and validation.
+  Also when choosing a classical model for tabular robot data (LightGBM/XGBoost, scikit-learn,
+  failure/anomaly classification from logs, success predictors).
 license: MIT
 metadata:
   author: https://github.com/Jeffallan
@@ -128,6 +130,20 @@ def validate_training_data(df):
         raise ValueError(f"Data validation failed: {results['result']}")
     return df  # safe to proceed to training
 ```
+
+## Classical ML on Tabular Robot Data
+
+Model choice (state the reason in one line when recommending):
+- Default: gradient boosting (LightGBM/XGBoost/CatBoost). Baseline first: logistic/linear regression.
+- Interpretability required: linear/logistic → shallow decision tree.
+- No labels: K-Means (k-means++, choose K by silhouette) before anything fancier.
+- Distance-based models (SVM, KNN, K-Means) need feature scaling; tree models do not.
+
+Pitfalls specific to robot logs — these break results more often than model choice:
+- **Split by episode / session / robot, never by frame.** Adjacent frames are near-duplicates → random split leaks and inflates every metric.
+- Fit scalers/encoders on the train split only.
+- Failure classes are rare: report precision/recall/PR-AUC per class, not accuracy.
+- Features computed with future data (centered windows, episode-level stats) leak the label at deploy time.
 
 ## Constraints
 

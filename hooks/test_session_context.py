@@ -221,6 +221,22 @@ def main():
                        capture_output=True, text=True, timeout=15)
     check("깨진 stdin — exit 0", r.returncode == 0, f"exit {r.returncode}")
 
+    # 10) REA 안내 — ~/re-lab 이 있을 때만, 안/밖에서 문구가 다르다 (HOME 을 가짜로 바꿔 실제 폴더와 무관하게)
+    h = tempfile.mkdtemp()
+    other = mk(tempfile.mkdtemp(), "pyproject.toml")
+    plain = lambda o: ANSI.sub("", (o or {}).get("systemMessage", ""))
+    out, _ = emit(other, {"HOME": h})
+    check("REA — re-lab 없으면 안내 안 함", "REA" not in plain(out), plain(out)[-300:])
+    os.makedirs(os.path.join(h, "re-lab", "notes"))
+    out, _ = emit(other, {"HOME": h})
+    check("REA — 밖에서는 claude-rea 안내", "claude-rea" in plain(out), plain(out)[-300:])
+    out, _ = emit(os.path.join(h, "re-lab", "notes"), {"HOME": h})
+    check("REA — 안에서는 붙어 있다고 표시", "이 세션에 붙어 있다" in plain(out), plain(out)[-300:])
+    over = [l for l in plain(out).splitlines() + plain(emit(other, {"HOME": h})[0]).splitlines()
+            if "REA" in l and dw(l) > BANNER_W]
+    check("REA 줄 폭 ≤ 배너 폭", not over, str(over))
+    shutil.rmtree(h, ignore_errors=True); shutil.rmtree(other, ignore_errors=True)
+
     print(f"\n{7 + 2 - len(fails)}/{7 + 2} 통과" if False else
           f"\n실패 {len(fails)}건" + (f": {fails}" if fails else " — 전부 통과"))
     sys.exit(1 if fails else 0)
