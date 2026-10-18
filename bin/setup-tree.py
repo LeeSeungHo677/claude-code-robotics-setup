@@ -171,10 +171,12 @@ HARNESS_NOTE = "Claude Code 자체 기능 — 디스크에 파일이 없다"
 
 HOOK_WHAT = {
     "dangerous-command-guard": "rm -rf · 강제푸시 · 하드웨어 구동 명령 차단",
-    "secret-scanner": "코드에 들어가는 키·토큰 차단",
+    "secret-scanner": "파일·외부 요청에 들어가는 키·토큰 차단",
     "ros2-workspace-guard": "build/ install/ log/ 편집 차단",
     "session-context": "이 배너 — 프로젝트 감지·git·추천 주입",
     "version-watch": "Claude Code 새 버전 알림",
+    "tool-run-log": "도구 실행 기록 · 같은 명령 3회 연속이면 경고",
+    "untrusted-content-flag": "외부에서 가져온 내용 속 지시문 표시",
 }
 
 
@@ -247,7 +249,8 @@ def disk_hooks():
             for g in groups:
                 for h in g.get("hooks", []):
                     m = re.search(r"hooks/([a-z0-9-]+)\.py", h.get("command", ""))
-                    if m:
+                    # 같은 훅을 matcher 여러 개에 등록할 수 있다(secret-scanner) — 이벤트당 한 번만 센다
+                    if m and m.group(1) not in out.get(ev, []):
                         out.setdefault(ev, []).append(m.group(1))
     except Exception:
         pass

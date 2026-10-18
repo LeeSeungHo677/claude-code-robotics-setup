@@ -116,6 +116,42 @@ def main():
     check("-d 에 TRIGGER 절이 안 샘", "TRIGGER when" not in d,
           next((l for l in d.split("\n") if "TRIGGER when" in l), "")[:120])
 
+    # 9) 훅 집계 — 임시 HOME 에 settings.json 을 만들어 설치 환경과 무관하게 검사한다.
+    #    같은 훅이 matcher 마다 등록돼도 한 번만 세야 하고, 배포하는 훅은 설명이 있어야 한다.
+    hooks_dir = os.path.join(HERE, "..", "hooks")
+    shipped = sorted(                     # 테스트 파일이 짝으로 있는 것 = 이 세팅이 배포하는 훅
+        f[:-3] for f in os.listdir(hooks_dir)
+        if f.endswith(".py") and not f.startswith("test_") and f != "hooklib.py"
+        and os.path.isfile(os.path.join(hooks_dir, "test_" + f[:-3].replace("-", "_") + ".py")))
+    if shipped:
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as home:
+            os.makedirs(os.path.join(home, ".claude"))
+            cmd = lambda n: {"type": "command", "command": f'python3 "$HOME/.claude/hooks/{n}.py"'}
+            cfg = {"hooks": {
+                # 첫 훅을 matcher 두 개에 등록 — 실제 secret-scanner 와 같은 모양
+                "PreToolUse": [{"matcher": "Write", "hooks": [cmd(shipped[0])]},
+                               {"matcher": "WebFetch", "hooks": [cmd(shipped[0])]}],
+                "PostToolUse": [{"matcher": "*", "hooks": [cmd(n) for n in shipped[1:]]}],
+            }}
+            with open(os.path.join(home, ".claude", "settings.json"), "w", encoding="utf-8") as f:
+                json.dump(cfg, f)
+            r = subprocess.run([sys.executable, TREE], capture_output=True, text=True, timeout=30,
+                               env={**os.environ, "HOME": home})
+            hk = r.stdout
+            check("임시 HOME 에서 exit 0", r.returncode == 0, r.stderr[-200:])
+            check(f"훅 {len(shipped)}개를 중복 없이 센다 (헤더)",
+                  re.search(rf"훅 {len(shipped)}(?!\d)", hk.split("\n")[1] if hk else "") is not None,
+                  (hk.split("\n") + ["", ""])[1])
+            check("같은 훅이 두 matcher 에 있어도 한 줄",
+                  len(re.findall(rf"(?<![a-z-]){re.escape(shipped[0])}(?![a-z-])", hk)) == 1,
+                  shipped[0])
+            bare = [n for n in shipped
+                    if not any(l.split(n, 1)[1].strip() for l in hk.split("\n")
+                               if re.search(rf"(?<![a-z-]){re.escape(n)}(?![a-z-])", l))]
+            check("배포 훅은 전부 설명이 붙음", not bare, f"설명 없음: {bare}")
+
     print(f"\n실패 {len(fails)}건" + (f": {fails}" if fails else " — 전부 통과"))
     sys.exit(1 if fails else 0)
 
