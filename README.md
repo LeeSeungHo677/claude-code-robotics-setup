@@ -1,7 +1,7 @@
 # claude-code-robotics-setup
 
 **로봇(ROS 2) 개발자를 위한 Claude Code `~/.claude` 세팅.**
-스킬 89 · 에이전트 14 · 커맨드 48 · 훅 7(테스트 154종).
+스킬 89 · 에이전트 14 · 커맨드 48 · 훅 7(테스트 150종 이상).
 
 실제 로봇 프로젝트(휴머노이드·4족·매니퓰레이터, 공장 자동화)에서 쓰면서 다듬은 것이다.
 스킬 카탈로그가 아니라 **한 벌로 동작하는 세팅**이라 그대로 설치해도 되고 필요한 것만 골라도 된다.
@@ -47,12 +47,12 @@ cd claude-code-robotics-setup
 
 **설치 스크립트가 지키는 것:**
 
-- 기존 `~/.claude/{skills,agents,commands,hooks,CLAUDE.md,settings.json}` 을
+- 기존 `~/.claude/{skills,agents,commands,hooks,bin,eval-harness,CLAUDE.md,settings.json}` 을
   `~/.claude/backups/pre-install-<타임스탬프>/` 로 **먼저 백업**한다.
 - 이미 `CLAUDE.md` / `settings.json` 이 있으면 **덮어쓰지 않고** `.new` 로 떨군다.
   권한 목록과 개인 규칙은 사람마다 다르다 — 덮어쓰면 당신 설정이 사라진다.
 - `projects/` `history.jsonl` `.credentials.json` 등 **대화 기록·자격증명 경로는 건드리지 않는다.**
-- 설치 후 훅 경로 확인 + **훅 테스트 154종**을 돌리고 결과를 보여준다.
+- 설치 후 훅 경로 확인 + **훅 테스트 150종 이상**을 돌리고 결과를 보여준다.
 
 옵션:
 
@@ -76,7 +76,18 @@ CLAUDE_DIR=/tmp/try ./install.sh   # 다른 위치에 시험 설치
       "hooks": [{ "type": "command",
                   "command": "python3 \"$HOME/.claude/hooks/secret-scanner.py\"", "timeout": 10 },
                 { "type": "command",
-                  "command": "python3 \"$HOME/.claude/hooks/ros2-workspace-guard.py\"", "timeout": 10 }] }
+                  "command": "python3 \"$HOME/.claude/hooks/ros2-workspace-guard.py\"", "timeout": 10 }] },
+    { "matcher": "WebFetch|WebSearch|mcp__.*",
+      "hooks": [{ "type": "command",
+                  "command": "python3 \"$HOME/.claude/hooks/secret-scanner.py\"", "timeout": 10 }] }
+  ],
+  "PostToolUse": [
+    { "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|mcp__.*",
+      "hooks": [{ "type": "command",
+                  "command": "python3 \"$HOME/.claude/hooks/tool-run-log.py\"", "timeout": 5 }] },
+    { "matcher": "WebFetch|WebSearch|Bash|mcp__.*",
+      "hooks": [{ "type": "command",
+                  "command": "python3 \"$HOME/.claude/hooks/untrusted-content-flag.py\"", "timeout": 5 }] }
   ],
   "SessionStart": [
     { "matcher": "",
@@ -106,7 +117,7 @@ CLAUDE_DIR=/tmp/try ./install.sh   # 다른 위치에 시험 설치
 ### 제거
 
 ```bash
-rm -rf ~/.claude/{skills,agents,commands,hooks}
+rm -rf ~/.claude/{skills,agents,commands,hooks,bin,eval-harness}
 cp -a ~/.claude/backups/pre-install-<타임스탬프>/. ~/.claude/
 ```
 
@@ -175,10 +186,12 @@ Claude 안에서는 `/setup:tree` 로도 같은 것이 나오지만, **그냥 �
 | 훅 | 차단(deny) | 확인(ask) |
 |---|---|---|
 | `dangerous-command-guard` | `rm -rf /`·`~`, mkfs, `dd` to `/dev/`, `curl \| sh`, 개인키 출력, `DROP DATABASE prod*` | **로봇 실기 구동 명령 전부**, `rm -r`, rosbag/데이터셋 삭제, `sudo`, `git push --force`, docker prune |
-| `secret-scanner` | 시크릿이 든 파일 쓰기 (AWS/GitHub/Anthropic/Google 키, 개인키, JWT, DB URL) | — |
+| `secret-scanner` | 시크릿이 든 파일 쓰기, 시크릿이 실린 외부 요청(`WebFetch`·`WebSearch`·MCP 인자) (AWS/GitHub/Anthropic/Google 키, 개인키, JWT, DB URL) | — |
 | `ros2-workspace-guard` | `build/`·`install/`·`log/`·`/opt/ros`·site-packages 의 ROS 패키지 편집 | — |
-| `session-context` | (차단 없음 — 세션 시작 시 프로젝트 정보 주입) | — |
+| `session-context` | (차단 없음 — 세션 시작 시 프로젝트 정보·`.claude/HANDOFF.md` 인수인계 주입) | — |
 | `version-watch` | (차단 없음 — Claude Code 버전이 올랐을 때만 알림) | — |
+| `tool-run-log` | (차단 없음 — 도구 실행을 `~/.claude/logs/` 에 기록, 같은 명령 3회 연속이면 경고) | — |
+| `untrusted-content-flag` | (차단 없음 — 외부에서 가져온 내용에 지시문이 섞이면 경고 표시) | — |
 
 **복합 명령도 분해해서 검사한다.** `cd ws && source install/setup.bash && ros2 launch ...`
 처럼 앞에 안전한 명령을 붙여도 실기 구동은 잡힌다.
@@ -195,7 +208,7 @@ Claude 안에서는 `/setup:tree` 로도 같은 것이 나오지만, **그냥 �
 출력 포맷도 구식(`{"decision":"block"}`)이라 현재 규격
 (`hookSpecificOutput.permissionDecision`)과 맞지 않았다.
 
-그래서 전부 직접 쓰고 **테스트 154종**을 붙였다.
+그래서 전부 직접 쓰고 **테스트 150종 이상**을 붙였다.
 
 ```bash
 for t in ~/.claude/hooks/test_*.py; do python3 "$t"; done
@@ -238,6 +251,7 @@ for t in ~/.claude/hooks/test_*.py; do python3 "$t"; done
   쿼터니언 순서는 ROS `(x,y,z,w)` / Eigen 생성자 `(w,x,y,z)` 로 **다르다**.
 - **파라미터는 한 번에 하나씩** 바꾸고 기록한다. 물리적 의미를 말할 수 없으면 바꾸지 않는다.
 - **성능은 N회 측정치로** 말한다. 1회 성공은 근거가 아니다.
+- **같은 증상을 3번 고쳐도 안 되면 멈추고 보고한다.** 네 번째 시도부터는 대개 같은 가설의 변형이다.
 - 긴 명령(`colcon build`, 학습 스크립트)은 백그라운드로 돌린다.
 
 ---
