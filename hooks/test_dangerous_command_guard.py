@@ -55,6 +55,14 @@ CASES = [
     (ASK,  "rm -rf robot/ros2_ws/build"),
     (ASK,  "rm -r datasets/episode_0001"),
 
+    # ── 2026-10-11 추가: heredoc 본문은 자료다 (PR 본문 파일에 `sudo apt install …` 글자가 있어 걸렸다) ──
+    (PASS, "cat > /tmp/pr.md <<'EOF'\n노트북 한 번: `sudo apt install ros-humble-foo`\nrm -rf / 라고 쓰지 마세요\nEOF"),
+    (PASS, "cat <<-EOF > /tmp/x\n\tsudo ls\n\tEOF"),
+    (ASK,  "cat > /tmp/x <<EOF\nhi $(sudo ls) there\nEOF"),          # 따옴표 없는 구분자 → $( ) 는 확장된다
+    (ASK,  "cat <<'EOF'\nhello\nEOF\nsudo apt install x"),            # heredoc 뒤의 진짜 명령은 그대로 검사
+    (ASK,  'echo "<<EOF"\nsudo ls'),                                   # 종결자 없는 가짜 heredoc 으로 우회 못 함
+    (ASK,  "cat <<<word\nsudo ls"),                                    # here-string 은 heredoc 이 아니다
+
     # ── 통과해야 하는 것 (오탐 방지) ──
     (PASS, "ls -la"),
     (PASS, "git status --short"),

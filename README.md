@@ -1,7 +1,7 @@
 # claude-code-robotics-setup
 
 **로봇(ROS 2) 개발자를 위한 Claude Code `~/.claude` 세팅.**
-스킬 86 · 에이전트 14 · 커맨드 46 · 훅 5(테스트 98종).
+스킬 88 · 에이전트 14 · 커맨드 47 · 훅 5(테스트 104종).
 
 실제 로봇 프로젝트(휴머노이드·4족·매니퓰레이터, 공장 자동화)에서 쓰면서 다듬은 것이다.
 스킬 카탈로그가 아니라 **한 벌로 동작하는 세팅**이라 그대로 설치해도 되고 필요한 것만 골라도 된다.
@@ -9,8 +9,8 @@
 > 💡 이 세팅의 성격: 지식은 **스킬**에, 강제는 **훅**에, 판단 기준은 **CLAUDE.md** 에 둔다.
 > 항상 로드되는 것(CLAUDE.md·에이전트 설명)은 짧게 유지하고, 나머지는 필요할 때만 열리게 한다.
 
-<sub>English: A Claude Code configuration for robotics/ROS 2 development — 86 skills, 14 agents,
-46 commands, and 5 tested hooks. Documentation is in Korean; skill trigger descriptions are
+<sub>English: A Claude Code configuration for robotics/ROS 2 development — 88 skills, 14 agents,
+47 commands, and 5 tested hooks. Documentation is in Korean; skill trigger descriptions are
 bilingual, so skill routing works with English prompts too.</sub>
 
 ---
@@ -19,7 +19,7 @@ bilingual, so skill routing works with English prompts too.</sub>
 
 | | 무엇 | 언제 로드되나 |
 |---|---|---|
-| **skills/** 86 | ROS 2·Nav2·SLAM·매니퓰레이션·인지/학습·시뮬·안전·플릿 운영 + 웹/백엔드/인프라 | 필요할 때만 (개수가 늘어도 비용 없음) |
+| **skills/** 88 | ROS 2·Nav2·SLAM·매니퓰레이션·인지/학습·시뮬·안전·플릿 운영 + 웹/백엔드/인프라 | 필요할 때만 (개수가 늘어도 비용 없음) |
 | **agents/** 14 | `ros2-reviewer` `robot-safety-reviewer` `robotics-architect` 등 | 이름을 불러야 옴 |
 | **commands/** 47 | `/robot:diagnose` `/robot:preflight` `/ros2:new-node` `/setup:tree` … | 슬래시로 호출 |
 | **hooks/** 5 | 위험 명령 차단, 시크릿 차단, colcon 생성물 편집 차단, 세션 시작 배너, 버전 감시 | 매 도구 호출 |
@@ -51,7 +51,7 @@ cd claude-code-robotics-setup
 - 이미 `CLAUDE.md` / `settings.json` 이 있으면 **덮어쓰지 않고** `.new` 로 떨군다.
   권한 목록과 개인 규칙은 사람마다 다르다 — 덮어쓰면 당신 설정이 사라진다.
 - `projects/` `history.jsonl` `.credentials.json` 등 **대화 기록·자격증명 경로는 건드리지 않는다.**
-- 설치 후 훅 경로 확인 + **훅 테스트 98종**을 돌리고 결과를 보여준다.
+- 설치 후 훅 경로 확인 + **훅 테스트 104종**을 돌리고 결과를 보여준다.
 
 옵션:
 
@@ -149,7 +149,7 @@ cp -a ~/.claude/backups/pre-install-<타임스탬프>/. ~/.claude/
 
 ### 4. 무엇이 있는지 보기 — `bin/setup-tree.py`
 
-스킬이 86개라 목록만으로는 안 잡힌다. 카테고리별 트리로 본다.
+스킬이 88개라 목록만으로는 안 잡힌다. 카테고리별 트리로 본다.
 
 ```bash
 python3 ~/.claude/bin/setup-tree.py            # 전체 (약 110줄)
@@ -194,7 +194,7 @@ Claude 안에서는 `/setup:tree` 로도 같은 것이 나오지만, **그냥 �
 출력 포맷도 구식(`{"decision":"block"}`)이라 현재 규격
 (`hookSpecificOutput.permissionDecision`)과 맞지 않았다.
 
-그래서 5개 전부 직접 쓰고 **테스트 98종**을 붙였다.
+그래서 5개 전부 직접 쓰고 **테스트 104종**을 붙였다.
 
 ```bash
 for t in ~/.claude/hooks/test_*.py; do python3 "$t"; done
