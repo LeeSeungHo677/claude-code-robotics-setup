@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="360" viewBox="0 0 900 360" role="img" aria-label="세팅 구조: 지식은 스킬, 강제는 훅, 판단 기준은 CLAUDE.md">
+<rect width="900" height="360" rx="16" fill="#0d1117" stroke="#30363d"/>
+<text x="450" y="40" fill="#f0f6fc" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="20" font-weight="700" text-anchor="middle">한 벌로 동작하는 세팅 — 역할을 셋으로 나눈다</text>
+<rect x="24" y="64" width="260" height="214" rx="12" fill="#161b22" stroke="#7ee787" stroke-opacity="0.7"/>
+<rect x="24" y="64" width="260" height="6" rx="3" fill="#7ee787"/>
+<text x="42" y="102" fill="#7ee787" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="21" font-weight="700">skills/</text>
+<text x="266" y="102" fill="#f0f6fc" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="17" font-weight="700" text-anchor="end">지식</text>
+<text x="42" y="130" fill="#8b949e" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="14">필요할 때만 열린다</text>
+<line x1="42" y1="144" x2="266" y2="144" stroke="#30363d"/>
+<text x="42" y="172" fill="#c9d1d9" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="14.5">증상으로 걸린다</text>
+<text x="42" y="198" fill="#c9d1d9" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="14.5">선택 기준 · 함정 · 진단 표</text>
+<text x="42" y="224" fill="#c9d1d9" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="14.5">개수가 늘어도 비용 없음</text>
+<text x="42" y="262" fill="#7ee787" fill-opacity="0.85" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12.5">/nav2  /robot-calibration</text>
+<rect x="320" y="64" width="260" height="214" rx="12" fill="#161b22" stroke="#58a6ff" stroke-opacity="0.7"/>
+<rect x="320" y="64" width="260" height="6" rx="3" fill="#58a6ff"/>
+<text x="338" y="102" fill="#58a6ff" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="21" font-weight="700">hooks/</text>
+<text x="562" y="102" fill="#f0f6fc" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="17" font-weight="700" text-anchor="end">강제</text>
+<text x="338" y="130" fill="#8b949e" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="14">매 도구 호출마다 자동</text>
+<line x1="338" y1="144" x2="562" y2="144" stroke="#30363d"/>
+<text x="338" y="172" fill="#c9d1d9" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="14.5">deny : 위험 명령 · 시크릿</text>
+<text x="338" y="198" fill="#c9d1d9" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="14.5">ask  : 실기 구동 명령</text>
+<text x="338" y="224" fill="#c9d1d9" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="14.5">기록 : 실행 로그 · 외부 지시문</text>
+<text x="338" y="262" fill="#58a6ff" fill-opacity="0.85" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12.5">stdin JSON · 테스트 포함</text>
+<rect x="616" y="64" width="260" height="214" rx="12" fill="#161b22" stroke="#d2a8ff" stroke-opacity="0.7"/>
+<rect x="616" y="64" width="260" height="6" rx="3" fill="#d2a8ff"/>
+<text x="634" y="102" fill="#d2a8ff" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="21" font-weight="700">CLAUDE.md</text>
+<text x="858" y="102" fill="#f0f6fc" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="17" font-weight="700" text-anchor="end">판단 기준</text>
+<text x="634" y="130" fill="#8b949e" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="14">매 세션 로드 (짧게)</text>
+<line x1="634" y1="144" x2="858" y2="144" stroke="#30363d"/>
+<text x="634" y="172" fill="#c9d1d9" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="14.5">반론 제기 · 실기/시뮬 구분</text>
+<text x="634" y="198" fill="#c9d1d9" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="14.5">계층부터 배제하는 진단 순서</text>
+<text x="634" y="224" fill="#c9d1d9" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="14.5">단위 · 좌표계 · 부호 명시</text>
+<text x="634" y="262" fill="#d2a8ff" fill-opacity="0.85" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12.5">규칙만, 지식은 스킬로</text>
+<rect x="24" y="294" width="260" height="46" rx="10" fill="#161b22" stroke="#30363d"/>
+<text x="40" y="313" fill="#f0f6fc" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13.5" font-weight="700">agents/</text>
+<text x="268" y="313" fill="#8b949e" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="12" text-anchor="end">이름을 불러야 온다</text>
+<text x="40" y="331" fill="#8b949e" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11.5">ros2-reviewer 등 검수·설계</text>
+<rect x="320" y="294" width="260" height="46" rx="10" fill="#161b22" stroke="#30363d"/>
+<text x="336" y="313" fill="#f0f6fc" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13.5" font-weight="700">commands/</text>
+<text x="564" y="313" fill="#8b949e" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="12" text-anchor="end">슬래시로 호출</text>
+<text x="336" y="331" fill="#8b949e" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11.5">/robot:diagnose · /ros2:new-node</text>
+<rect x="616" y="294" width="260" height="46" rx="10" fill="#161b22" stroke="#30363d"/>
+<text x="632" y="313" fill="#f0f6fc" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13.5" font-weight="700">bin/ · eval-harness/</text>
+<text x="860" y="313" fill="#8b949e" font-family="ui-sans-serif,-apple-system,'Segoe UI','Noto Sans CJK KR',sans-serif" font-size="12" text-anchor="end">수동 실행</text>
+<text x="632" y="331" fill="#8b949e" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11.5">setup-tree.py · 평가 케이스</text>
+</svg>

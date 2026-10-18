@@ -1,21 +1,53 @@
-# claude-code-robotics-setup
+<div align="center">
 
-**로봇(ROS 2) 개발자를 위한 Claude Code `~/.claude` 세팅.**
-스킬 89 · 에이전트 14 · 커맨드 48 · 훅 7(테스트 150종 이상).
+<img src="assets/logo.svg" alt="claude-code-robotics-setup" width="620">
 
-실제 로봇 프로젝트(휴머노이드·4족·매니퓰레이터, 공장 자동화)에서 쓰면서 다듬은 것이다.
-스킬 카탈로그가 아니라 **한 벌로 동작하는 세팅**이라 그대로 설치해도 되고 필요한 것만 골라도 된다.
+<h3>로봇(ROS 2) 개발자를 위한 Claude Code <code>~/.claude</code> 세팅</h3>
 
-> 💡 이 세팅의 성격: 지식은 **스킬**에, 강제는 **훅**에, 판단 기준은 **CLAUDE.md** 에 둔다.
-> 항상 로드되는 것(CLAUDE.md·에이전트 설명)은 짧게 유지하고, 나머지는 필요할 때만 열리게 한다.
+스킬 89 · 에이전트 14 · 커맨드 48 · 훅 7 (훅 테스트 150종 이상)
+
+<p>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/LeeSeungHo677/claude-code-robotics-setup?style=flat-square&color=58a6ff" alt="license"></a>
+  <a href="#contributing"><img src="https://img.shields.io/badge/PRs-welcome-3fb950?style=flat-square" alt="PRs welcome"></a>
+  <a href="https://github.com/LeeSeungHo677/claude-code-robotics-setup/stargazers"><img src="https://img.shields.io/github/stars/LeeSeungHo677/claude-code-robotics-setup?style=flat-square&color=e3b341" alt="stars"></a>
+  <a href="https://github.com/LeeSeungHo677/claude-code-robotics-setup/commits/main"><img src="https://img.shields.io/github/last-commit/LeeSeungHo677/claude-code-robotics-setup?style=flat-square&color=8957e5" alt="last commit"></a>
+  <img src="https://img.shields.io/badge/ROS%202-Humble-22314E?style=flat-square" alt="ROS 2 Humble">
+  <img src="https://img.shields.io/badge/Claude%20Code-setup-d97757?style=flat-square" alt="Claude Code">
+  <img src="https://img.shields.io/badge/python-3.8%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.8+">
+</p>
 
 <sub>English: A Claude Code configuration for robotics/ROS 2 development — 89 skills, 14 agents,
 48 commands, and 7 tested hooks. Documentation is in Korean; skill trigger descriptions are
 bilingual, so skill routing works with English prompts too.</sub>
 
+</div>
+
+```bash
+git clone https://github.com/LeeSeungHo677/claude-code-robotics-setup.git
+cd claude-code-robotics-setup
+
+./install.sh --dry-run   # 무엇이 바뀌는지 먼저 본다
+./install.sh             # 설치 (기존 ~/.claude 는 자동 백업)
+```
+
+<!-- TODO 데모 GIF: 터미널에서 `claude` 를 열고 증상 하나를 말해 스킬이 걸리는 장면을 녹화해
+     assets/demo.gif 로 저장한 뒤 아래 주석을 풀면 된다.
+<p align="center"><img src="assets/demo.gif" alt="demo" width="760"></p>
+-->
+
+실제 로봇 프로젝트(휴머노이드·4족·매니퓰레이터, 공장 자동화)에서 쓰면서 다듬은 것이다.
+스킬 카탈로그가 아니라 **한 벌로 동작하는 세팅**이라 그대로 설치해도 되고 필요한 것만 골라도 된다.
+
+<p align="center">
+  <img src="assets/overview.svg" alt="지식은 skills, 강제는 hooks, 판단 기준은 CLAUDE.md" width="860">
+</p>
+
+> 💡 지식은 **스킬**에, 강제는 **훅**에, 판단 기준은 **CLAUDE.md** 에 둔다.
+> 항상 로드되는 것(CLAUDE.md·에이전트 설명)은 짧게 유지하고, 나머지는 필요할 때만 열리게 한다.
+
 ---
 
-## 뭐가 들어 있나
+## Features
 
 | | 무엇 | 언제 로드되나 |
 |---|---|---|
@@ -33,9 +65,77 @@ bilingual, so skill routing works with English prompts too.</sub>
 `imitation-learning` · `legged-rl` · `vla-vlm-robotics` · `robot-safety-compliance` ·
 `multi-robot-fleet` · `robot-networking` · `fieldbus-comm` · `incident-analysis`
 
+### 한 번의 요청이 지나가는 길
+
+```mermaid
+flowchart TD
+    A(["세션 시작"]) --> B["SessionStart 훅<br/>배너 · 프로젝트 감지"]
+    B --> C(["사용자 프롬프트"])
+    C --> D{"스킬 description 매칭"}
+    D -->|"증상 · 도구 이름 일치"| E["스킬이 열림<br/>선택 기준 · 함정 · 진단 표"]
+    D -->|"불일치"| F["기본 응답"]
+    E --> G["도구 호출"]
+    F --> G
+    G --> H{"PreToolUse 훅"}
+    H -->|"deny"| X["차단 + 사유 출력"]
+    H -->|"ask"| Y["사용자 확인<br/>실기 구동 명령은 항상 여기"]
+    H -->|"통과"| I["실행"]
+    Y -->|"승인"| I
+    I --> J["PostToolUse 훅<br/>실행 기록 · 외부 지시문 표시"]
+    J --> K(["결과가 Claude 에게 돌아감"])
+
+    classDef hook fill:#1f6feb,stroke:#58a6ff,color:#ffffff
+    classDef stop fill:#da3633,stroke:#ff7b72,color:#ffffff
+    classDef ask fill:#9e6a03,stroke:#e3b341,color:#ffffff
+    classDef skill fill:#238636,stroke:#7ee787,color:#ffffff
+    class B,H,J hook
+    class X stop
+    class Y ask
+    class E skill
+```
+
+### 레포 구조
+
+```
+claude-code-robotics-setup/
+├── install.sh                 백업 → 복사 → 검증   (--dry-run · --link)
+├── CLAUDE.md                  항상 로드되는 규칙    (설치 시 기존 파일이 있으면 .new 로 떨군다)
+├── settings.json              권한 + 훅 등록        (설치 시 기존 파일이 있으면 .new 로 떨군다)
+├── skills/<name>/SKILL.md     지식 본체. 큰 스킬은 라우터 + references/
+├── agents/<name>.md           역할이 뚜렷한 작업용
+├── commands/<그룹>/<이름>.md   /그룹:이름 으로 호출
+├── hooks/                     결정론적 강제 + 훅마다 테스트
+│   ├── dangerous-command-guard.py   ros2-workspace-guard.py   secret-scanner.py
+│   ├── session-context.py           version-watch.py
+│   ├── tool-run-log.py              untrusted-content-flag.py
+│   └── hooklib.py · test_*.py
+├── bin/setup-tree.py          세팅 전체를 tree 로 보여준다
+├── eval-harness/              스킬 라우팅·안전 회귀 평가
+├── assets/                    README 이미지 (로고 · 개요도 · tree 화면)
+└── LICENSE · NOTICE           MIT + 가져온 파일의 원 라이선스 출처
+```
+
+### 설치하면 무엇이 보이나 — `setup-tree.py`
+
+`python3 ~/.claude/bin/setup-tree.py` 출력 그대로다. 스킬은 용도별 카테고리로 묶여 있다.
+
+<details>
+<summary><b>스킬 — 카테고리별 트리</b></summary>
+<br>
+<p align="center"><img src="assets/setup-tree-skills.svg" alt="setup-tree 출력: 스킬" width="760"></p>
+</details>
+
+<details>
+<summary><b>에이전트 · 커맨드 — 트리</b></summary>
+<br>
+<p align="center"><img src="assets/setup-tree-agents-commands.svg" alt="setup-tree 출력: 에이전트와 커맨드" width="760"></p>
+</details>
+
 ---
 
-## 설치
+## Quick Start
+
+### 1. 설치
 
 ```bash
 git clone https://github.com/LeeSeungHo677/claude-code-robotics-setup.git
@@ -52,7 +152,7 @@ cd claude-code-robotics-setup
 - 이미 `CLAUDE.md` / `settings.json` 이 있으면 **덮어쓰지 않고** `.new` 로 떨군다.
   권한 목록과 개인 규칙은 사람마다 다르다 — 덮어쓰면 당신 설정이 사라진다.
 - `projects/` `history.jsonl` `.credentials.json` 등 **대화 기록·자격증명 경로는 건드리지 않는다.**
-- 설치 후 훅 경로 확인 + **훅 테스트 150종 이상**을 돌리고 결과를 보여준다.
+- 설치 후 훅 경로 확인 + **테스트를 돌리고** 결과를 보여준다.
 
 옵션:
 
@@ -61,7 +161,7 @@ cd claude-code-robotics-setup
 CLAUDE_DIR=/tmp/try ./install.sh   # 다른 위치에 시험 설치
 ```
 
-### settings.json 을 이미 쓰고 있다면
+### 2. settings.json 을 이미 쓰고 있다면
 
 `settings.json.new` 가 생긴다. **최소한 `hooks` 블록은 옮겨야 훅이 동작한다.**
 
@@ -101,7 +201,7 @@ CLAUDE_DIR=/tmp/try ./install.sh   # 다른 위치에 시험 설치
 
 > 경로는 `~` 가 아니라 `$HOME` 을 쓴다 — `~` 는 따옴표 안에서 확장되지 않는다.
 
-### 설치 후
+### 3. 설치 후
 
 1. `~/.claude/CLAUDE.md` 의 **「이 환경」 절만** 당신 환경에 맞게 고친다. 나머지는 그대로 써도 된다.
 2. **새 세션을 연다.** 훅·권한·스킬 변경은 현재 세션에 적용되지 않는다.
@@ -123,7 +223,7 @@ cp -a ~/.claude/backups/pre-install-<타임스탬프>/. ~/.claude/
 
 ---
 
-## 쓰는 법
+## Usage
 
 ### 1. 그냥 말한다 — 스킬은 알아서 열린다
 
@@ -179,9 +279,9 @@ Claude 안에서는 `/setup:tree` 로도 같은 것이 나오지만, **그냥 �
 
 ---
 
-## 훅 — 무엇이 자동으로 막히나
+## Hooks
 
-미리 알아두면 당황하지 않는다.
+무엇이 자동으로 막히는지 미리 알아두면 당황하지 않는다.
 
 | 훅 | 차단(deny) | 확인(ask) |
 |---|---|---|
@@ -225,7 +325,7 @@ for t in ~/.claude/hooks/test_*.py; do python3 "$t"; done
 
 ---
 
-## 권한 정책
+## Permissions
 
 | 분류 | 대상 |
 |---|---|
@@ -237,7 +337,7 @@ for t in ~/.claude/hooks/test_*.py; do python3 "$t"; done
 
 ---
 
-## CLAUDE.md 가 강제하는 것
+## CLAUDE.md
 
 매 세션 로드되므로 짧게 유지한다. 요점:
 
@@ -256,7 +356,7 @@ for t in ~/.claude/hooks/test_*.py; do python3 "$t"; done
 
 ---
 
-## 세팅을 고치거나 확장할 때
+## Extending
 
 **`setup-maintenance` 스킬을 먼저 연다.** 거기에 있는 것:
 무엇을 스킬/에이전트/커맨드/훅 중 어디에 넣을지, 스킬·훅 작성 규칙, 변경 후 검증 스크립트.
@@ -285,7 +385,7 @@ for t in hooks/test_*.py; do python3 "$t" >/dev/null && echo "OK $t" || echo "FA
 
 ---
 
-## 알아둘 것
+## FAQ
 
 | 증상 | 확인 |
 |---|---|
@@ -301,7 +401,17 @@ for t in hooks/test_*.py; do python3 "$t" >/dev/null && echo "OK $t" || echo "FA
 
 ---
 
-## 라이선스
+## Contributing
+
+이슈·PR 환영. 특히:
+
+- **스킬 내용이 틀렸다** — 가장 중요하다. 틀린 지식을 자신 있게 말하는 세팅은 없느니만 못하다.
+- 훅 오탐 사례 (막히면 안 되는 것이 막혔다)
+- 다른 로봇 플랫폼·다른 ROS 배포판에서의 차이
+
+훅을 고치는 PR 은 **테스트를 함께** 넣어주면 좋다.
+
+## License
 
 MIT ([LICENSE](LICENSE)).
 단, 여러 오픈소스에서 가져온 파일이 포함되어 있고 **해당 파일은 원 라이선스를 따른다.**
@@ -311,13 +421,3 @@ MIT ([LICENSE](LICENSE)).
 
 출처 표기가 틀렸거나 라이선스 조건이 맞지 않는 부분이 있으면 **이슈로 알려주면 즉시 고치거나
 해당 파일을 제거하겠다.**
-
-## 기여
-
-이슈·PR 환영. 특히:
-
-- **스킬 내용이 틀렸다** — 가장 중요하다. 틀린 지식을 자신 있게 말하는 세팅은 없느니만 못하다.
-- 훅 오탐 사례 (막히면 안 되는 것이 막혔다)
-- 다른 로봇 플랫폼·다른 ROS 배포판에서의 차이
-
-훅을 고치는 PR 은 **테스트를 함께** 넣어주면 좋다.
