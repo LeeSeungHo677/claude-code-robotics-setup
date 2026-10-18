@@ -11,10 +11,16 @@
 입력: stdin JSON / 출력: deny·ask JSON (+ deny 는 exit 2)
 """
 
+import importlib.util
 import json
 import os
 import re
+import shlex
 import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from hooklib import generated_root, log_hook_error  # noqa: E402
 
 HOME = os.path.expanduser("~")
 
@@ -167,7 +173,60 @@ WHOLE_DENY_RULES = [
 ]
 
 
-def decide(command):
+# ── Bash 로 colcon 생성물을 고치는 경로 (2026-10-18) ─────────────────────────
+# ros2-workspace-guard 는 Write/Edit 만 본다. `sed -i install/…`, `cp x build/…`, `> log/…` 는
+# 그 훅을 거치지 않았다. 판정은 같은 함수(hooklib.generated_root)를 쓴다.
+REDIRECT_RX = re.compile(r"(?<![<0-9&])>{1,2}\|?\s*([^\s;&|<>]+)")
+
+
+def write_targets(sub):
+    """하위 명령 하나가 '내용을 쓰는' 대상 경로들. 삭제(rm)는 대상이 아니다 — 생성물 정리는 정상 작업."""
+    targets = [m.group(1).strip("'\"") for m in REDIRECT_RX.finditer(sub)]
+    try:
+        toks = shlex.split(sub)
+    except ValueError:
+        toks = sub.split()
+    if toks:
+        cmd, args = os.path.basename(toks[0]), toks[1:]
+        nonopt = [a for a in args if not a.startswith("-")]
+        if cmd == "sed" and any(a.startswith(("-i", "--in-place")) for a in args):
+            has_script_opt = any(a in ("-e", "--expression", "-f", "--file") for a in args)
+            targets += nonopt if has_script_opt else nonopt[1:]
+        elif cmd == "tee":
+            targets += nonopt
+        elif cmd in ("cp", "mv", "install", "rsync") and len(nonopt) >= 2:
+            targets.append(nonopt[-1])
+    return [x for x in targets if x and not x.startswith("/dev/")]
+
+
+# ── 외부 요청에 시크릿이 실리는 경로 (2026-10-18) ────────────────────────────
+# secret-scanner 는 파일 쓰기만 본다. `curl -H "Authorization: Bearer <실제 토큰>"` 은 그대로 나갔다.
+# 패턴은 secret-scanner 의 것을 그대로 쓴다 (두 곳에 따로 두면 한쪽이 낡는다).
+EGRESS_RX = re.compile(r"\b(curl|wget|http|https|xh)\b")
+
+
+def _secret_patterns():
+    try:
+        spec = importlib.util.spec_from_file_location("secret_scanner", os.path.join(HERE, "secret-scanner.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.PATTERNS, mod.PLACEHOLDER
+    except Exception:
+        return [], None
+
+
+def egress_secret(sub):
+    if not EGRESS_RX.search(sub):
+        return None
+    patterns, placeholder = _secret_patterns()
+    for name, rx in patterns:
+        m = rx.search(sub)
+        if m and not (placeholder and placeholder.search(m.group(0))):
+            return name
+    return None
+
+
+def decide(command, cwd=None):
     command = strip_heredocs(command)
     for rx, why in WHOLE_DENY_RULES:
         if rx.search(command):
@@ -180,14 +239,24 @@ def decide(command):
         for rx, why in ASK_RULES:
             if rx.search(sub):
                 return "ask", why, sub
+    for sub in split_commands(command):
+        name = egress_secret(sub)
+        if name:
+            return "ask", f"외부 요청에 시크릿으로 보이는 값({name})이 실립니다 — 환경변수로 넘기세요", sub
+        for target in write_targets(sub):
+            root = generated_root(target, cwd)
+            if root:
+                return "ask", (f"colcon 생성물({root})을 Bash 로 수정 — 다음 빌드에서 사라집니다. "
+                               f"src/ 쪽을 고치세요"), sub
     return None, None, None
 
 
 def main():
     try:
         data = json.load(sys.stdin)
-    except Exception:
-        sys.exit(0)
+    except Exception as e:
+        log_hook_error("dangerous-command-guard", f"stdin 파싱 실패: {e}")
+        sys.exit(0)   # fail-open (의도) — 대신 기록한다
 
     if data.get("tool_name") != "Bash":
         sys.exit(0)
@@ -195,7 +264,7 @@ def main():
     if not command.strip():
         sys.exit(0)
 
-    decision, why, sub = decide(command)
+    decision, why, sub = decide(command, data.get("cwd"))
     if decision is None:
         sys.exit(0)
 

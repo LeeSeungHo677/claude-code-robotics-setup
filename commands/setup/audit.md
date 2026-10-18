@@ -6,6 +6,15 @@ description: ~/.claude 세팅 전체를 점검한다 — 깨진 참조, 중복, 
 
 ## 점검 항목
 
+### 0. 결정적 점검 스크립트 (먼저 실행)
+```bash
+python3 ~/.claude/bin/audit-checks.py
+```
+정책↔강제 일치(CLAUDE.md 의 하드웨어 명령이 ask/guard 에 걸리고 allow 에 없는가), 고정 컨텍스트 크기 예산,
+안 쓰는 스킬, 우리 것이 아닌 훅과 그 네트워크 호출, 훅 fail-open 기록(`logs/hook-errors.log`),
+90일 넘은 project/reference 메모리. 결과의 ✗ 는 그대로 보고서 "깨진 것"·"표류" 로 옮긴다.
+도구 실행 기록은 `~/.claude/logs/tools-YYYY-MM.jsonl` — 사고 조사·파라미터 이력 확인에 쓴다.
+
 ### 1. 구조 유효성 (자동 검증)
 `setup-maintenance` 스킬의 검증 스크립트를 실행한다:
 - `settings.json` JSON 유효성, 훅 파일 경로 존재 여부

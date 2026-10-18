@@ -1,0 +1,5 @@
+{
+  "name": "setup-evals",
+  "version": "0.1.0",
+  "description": "~/.claude 스킬 라우팅 회귀 평가용 래퍼. skills/ 는 ../skills 심볼릭 링크 — 평가 실행은 격리돼 사용자 스킬이 안 보이므로 플러그인으로 감싼다."
+}

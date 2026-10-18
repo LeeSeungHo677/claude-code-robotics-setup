@@ -214,7 +214,10 @@ def banner(f):
 
     # ── 안 써본 스킬 하나 ────────────────────────────────────────────
     if f["rot"]:
-        body = [_row("", _cyan(f["rot"][0]) + _dim(" — " + _clip(f["rot"][1], 44)))]
+        # 설명 폭은 스킬 이름 길이를 빼고 잡는다 — 고정 44 였을 때 이름이 긴 스킬이
+        # 돌아오는 날만 줄이 넘쳤다 (순환이라 테스트도 그날만 실패했다, 2026-10-18)
+        room = BANNER_W - 1 - INDENT - LW - _w(f["rot"][0]) - 3
+        body = [_row("", _cyan(f["rot"][0]) + _dim(" — " + _clip(f["rot"][1], max(12, min(44, room)))))]
         if unused:
             body.append(_row("", _dim(f"아직 안 써본 스킬 {unused}개 중 하나")))
         secs.append(("오늘 열어볼 것", "", body))
@@ -478,6 +481,52 @@ def rotation_skill(stack):
         return None
 
 
+# ── 세션 인수인계 (.claude/HANDOFF.md) — 2026-10-18 ─────────────────────────
+# RESUME.md 는 Claude Code 가 자동으로 쓰는 체크포인트라 이름을 피했다 (덮어쓰인다).
+# 형식은 /workflow:wrap-up 이 정한다. 여기서는 필요한 절만 골라 짧게 넣는다.
+HANDOFF_MAX = 900          # 기본 컨텍스트(700자)와 별도 예산
+HANDOFF_STARTUP = ("고정", "다음 1개", "목표")
+HANDOFF_COMPACT = ("고정", "다음 1개")   # 압축 직후엔 '지금 실기 중' 같은 세션 사실만 되살린다
+
+
+def _sections(text):
+    out, cur = {}, None
+    for line in text.splitlines():
+        m = re.match(r"^##\s+(.+?)\s*(\(.*\))?\s*$", line)
+        if m:
+            cur = m.group(1).strip()
+            out[cur] = []
+        elif cur is not None and line.strip():
+            out[cur].append(line.rstrip())
+    return out
+
+
+def handoff_context(cwd, source):
+    path = os.path.join(cwd, ".claude", "HANDOFF.md")
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        age = (datetime.datetime.now().timestamp() - os.path.getmtime(path)) / 86400
+    except OSError:
+        return ""
+    secs = _sections(text)
+    want = HANDOFF_COMPACT if source == "compact" else HANDOFF_STARTUP
+    body = []
+    for name in want:
+        if secs.get(name):
+            body.append(f"**{name}**")
+            body.extend(secs[name])
+    if not body:
+        return ""
+    stale = f" — {age:.0f}일 전 기록, 지금도 맞는지 확인할 것" if age >= 3 else ""
+    head = ("## 압축 전 고정 사항 (.claude/HANDOFF.md)" if source == "compact"
+            else f"## 지난 세션 인수인계 (.claude/HANDOFF.md{stale})")
+    out = head + "\n" + "\n".join(body)
+    if len(out) > HANDOFF_MAX:
+        out = out[:HANDOFF_MAX].rsplit("\n", 1)[0] + "\n… (전체는 .claude/HANDOFF.md)"
+    return out
+
+
 def main():
     try:
         data = json.load(sys.stdin)
@@ -485,6 +534,15 @@ def main():
         data = {}
 
     cwd = data.get("cwd") or os.getcwd()
+    source = data.get("source", "startup")
+    handoff = handoff_context(cwd, source)
+
+    if source == "compact":
+        # 압축 직후에는 배너·추천을 다시 낼 필요가 없다. 고정 사항만 되살린다.
+        if handoff:
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "SessionStart", "additionalContext": handoff}}, ensure_ascii=False))
+        sys.exit(0)
 
     stack = detect_stack(cwd)
     reco = recommend(cwd, stack)
@@ -544,7 +602,8 @@ def main():
         "systemMessage": banner(facts),
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
-            "additionalContext": "## 세션 시작 컨텍스트 (자동 수집)\n" + "\n".join(lines),
+            "additionalContext": "## 세션 시작 컨텍스트 (자동 수집)\n" + "\n".join(lines)
+                                 + (("\n\n" + handoff) if handoff else ""),
         },
     }, ensure_ascii=False))
     sys.exit(0)

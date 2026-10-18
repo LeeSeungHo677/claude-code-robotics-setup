@@ -45,6 +45,15 @@ git bisect reset
 
 Bisect performs binary search across commits to find which commit introduced a bug. Automated bisect with `run` is the fastest approach.
 
+`bisect run` 스크립트의 종료 코드: **0 = good, 1~124 = bad, 125 = skip(판정 불가)**. 빌드 자체가 깨지는 커밋을
+bad 로 돌려주면 엉뚱한 커밋을 범인으로 지목한다 — 빌드 실패는 125 로 처리한다:
+
+```bash
+# ROS 2 예: 빌드 실패 → skip, 테스트 실패 → bad
+git bisect run sh -c 'colcon build --packages-select my_pkg >/dev/null 2>&1 || exit 125; \
+  colcon test --packages-select my_pkg --return-code-on-test-failure >/dev/null 2>&1'
+```
+
 ## Interactive Rebase
 
 ```bash

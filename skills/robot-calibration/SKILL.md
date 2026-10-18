@@ -3,8 +3,9 @@ name: robot-calibration
 description: >
   센서·로봇 캘리브레이션과 시간 동기화. TRIGGER when the user calibrates camera intrinsics/distortion, sensor
   extrinsics (LiDAR-camera, IMU-camera), hand-eye (eye-in-hand / eye-to-hand), IMU bias or wheel
-  odometry, aligns timestamps, configures PTP/NTP or hardware triggering — or hits 'point cloud
-  does not overlap the image / arm misses by a constant offset'.
+  odometry, aligns timestamps, configures PTP/NTP or hardware triggering, uses Kalibr — or hits 'point cloud
+  does not overlap the image / arm misses by a constant offset / VIO·VINS 가 빠르게 움직일 때 발산 /
+  캘리브레이션은 잘 나왔는데 실제로 틀어진다'.
 ---
 
 # 캘리브레이션 · 시간 동기화

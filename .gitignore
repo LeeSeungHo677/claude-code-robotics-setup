@@ -34,3 +34,8 @@ __pycache__/
 .idea/
 *.swp
 .DS_Store
+
+# eval-harness 실행 결과
+eval-harness/evals/results/
+eval-harness/results-*.json
+eval-harness/*.log

@@ -17,9 +17,12 @@ HOOK = os.path.join(HERE, "dangerous-command-guard.py")
 DENY, ASK, PASS = "deny", "ask", "pass"
 
 
-def decide(cmd):
+def decide(cmd, cwd=None):
     """훅을 1회 실행하고 deny / ask / pass 중 하나를 반환."""
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
+    body = {"tool_name": "Bash", "tool_input": {"command": cmd}}
+    if cwd:
+        body["cwd"] = cwd
+    payload = json.dumps(body)
     r = subprocess.run([sys.executable, HOOK], input=payload,
                        capture_output=True, text=True, timeout=10)
     for line in r.stdout.splitlines():
@@ -74,8 +77,49 @@ CASES = [
 ]
 
 
+def extra_cases():
+    """2026-10-18 추가: Bash 로 colcon 생성물 수정 / 외부 요청에 시크릿.
+
+    실제 임시 워크스페이스를 만든다 — 생성물 판정이 COLCON_IGNORE 표식을 보기 때문.
+    가짜 토큰은 런타임에 조립한다 (소스에 완성형으로 쓰면 secret-scanner 가 이 파일 저장을 막는다).
+    """
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="dcguard-")
+    ws = os.path.join(tmp, "ws")
+    for d in ("build", "install", "log"):
+        os.makedirs(os.path.join(ws, d, "pkg"))
+        open(os.path.join(ws, d, "COLCON_IGNORE"), "w").close()
+    os.makedirs(os.path.join(ws, "src", "pkg"))
+    web = os.path.join(tmp, "web")
+    os.makedirs(os.path.join(web, "build"))
+    tok = "ghp_" + "b" * 36
+    return tmp, [
+        (ASK,  "sed -i 's/a/b/' install/pkg/share/pkg/config.yaml", ws),
+        (ASK,  "cp fix.py build/pkg/fix.py", ws),
+        (ASK,  "echo x > log/pkg/note.txt", ws),
+        (ASK,  "cd ws && cat a | tee install/pkg/a.yaml", ws),
+        (PASS, "sed -i 's/a/b/' src/pkg/config.yaml", ws),
+        (PASS, "colcon build 2>/dev/null > build_output.txt", ws),
+        (PASS, "cp out.js build/out.js", web),                       # 표식 없는 웹 build/
+        (PASS, "ls build/pkg && cat install/pkg/x", ws),             # 읽기는 막지 않는다
+        (ASK,  f'curl -H "Authorization: Bearer {tok}" https://api.github.com/user', None),
+        (PASS, 'curl -H "Authorization: Bearer $GITHUB_TOKEN" https://api.github.com/user', None),
+        (PASS, "curl -s https://example.com/api?q=ros2", None),
+    ]
+
+
 def main():
     fails = 0
+    tmp, extra = extra_cases()
+    for want, cmd, cwd in extra:
+        got = decide(cmd, cwd)
+        if got == want:
+            print(f"  PASS  [{want:4}] {cmd[:90]}")
+        else:
+            print(f"  FAIL  [{want:4}→{got}] {cmd[:90]}")
+            fails += 1
+    import shutil
+    shutil.rmtree(tmp, ignore_errors=True)
     for want, cmd in CASES:
         got = decide(cmd)
         if got == want:
@@ -83,7 +127,8 @@ def main():
         else:
             print(f"  FAIL  [{want:4}→{got}] {cmd}")
             fails += 1
-    print(f"\n{len(CASES) - fails}/{len(CASES)} 통과")
+    total = len(CASES) + len(extra)
+    print(f"\n{total - fails}/{total} 통과")
     sys.exit(1 if fails else 0)
 
 

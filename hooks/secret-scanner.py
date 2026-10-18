@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """PreToolUse(Write|Edit|MultiEdit) — 파일에 기록되기 *전에* 시크릿 유출을 차단.
+   PreToolUse(WebFetch|WebSearch|mcp__.*) — 외부로 나가는 요청 인자에 시크릿이 실리는 것을 차단 (2026-10-18).
 
 입력: stdin JSON (Claude Code 규격)
 동작: tool_input 안에 들어있는 '앞으로 쓰일 내용'을 검사한다.
@@ -11,6 +12,13 @@ import json
 import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from hooklib import log_hook_error
+except Exception:                    # 다른 훅이 이 파일을 모듈로 읽을 때도 깨지지 않게
+    def log_hook_error(*_a, **_k):
+        pass
 
 # ── 탐지 패턴 ────────────────────────────────────────────────────────────────
 PATTERNS = [
@@ -56,14 +64,65 @@ def collect_text(tool_name, tool_input):
     return "\n".join(c for c in chunks if isinstance(c, str))
 
 
+def is_egress(tool_name):
+    return tool_name in ("WebFetch", "WebSearch") or tool_name.startswith("mcp__")
+
+
+def egress_values(obj):
+    """요청 인자 안의 문자열 값 전부 (URL 쿼리, prompt, MCP 인자 중첩 포함)."""
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            yield from egress_values(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from egress_values(v)
+
+
+def egress_findings(tool_input):
+    """외부 요청은 줄 단위 placeholder 판정을 쓰지 않는다 — URL 에 'example.com' 만 있어도 통째로 통과돼 버린다.
+    대신 **걸린 값 자체**가 placeholder 인지만 본다."""
+    out = []
+    for v in egress_values(tool_input):
+        for name, rx in PATTERNS:
+            m = rx.search(v)
+            if m and not PLACEHOLDER.search(m.group(0)):
+                out.append((0, name, m.group(0)[:12] + "…"))
+                break
+    return out
+
+
+def deny(reason):
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }))
+    print(reason, file=sys.stderr)
+    sys.exit(2)
+
+
 def main():
     try:
         data = json.load(sys.stdin)
-    except Exception:
-        sys.exit(0)  # 입력을 못 읽으면 조용히 통과 (작업을 막지 않는다)
+    except Exception as e:
+        log_hook_error("secret-scanner", f"stdin 파싱 실패: {e}")
+        sys.exit(0)  # 입력을 못 읽으면 통과 (작업을 막지 않는다) — 대신 기록한다
 
     tool_name = data.get("tool_name", "")
     tool_input = data.get("tool_input", {}) or {}
+
+    if is_egress(tool_name):
+        findings = egress_findings(tool_input)
+        if findings:
+            detail = "\n".join(f"  - {name}: {snip}" for _, name, snip in findings[:5])
+            deny(f"[secret-scanner] {tool_name} 요청 인자에 시크릿으로 보이는 값이 있어 차단했습니다 — "
+                 f"외부 서비스로 나가면 회수할 수 없습니다.\n{detail}")
+        sys.exit(0)
+
     file_path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
 
     if SKIP_PATH.search(file_path):
