@@ -51,3 +51,6 @@ Duration: <total time>
 - Keep each sub-task focused and independently verifiable.
 - Save progress after each completed task so work is not lost on failure.
 - Limit workflow to 10 tasks maximum; break larger workflows into phases.
+- Tier sub-agents by task: broad scans (file audits, pattern search, fan-out) → `Explore` or a light model; edits → `isolation: "worktree"`; a verify step (lint/test/cross-check) must pass before a worktree change reaches the main tree.
+- Read summaries from sub-agents, not their raw output. Filter scan results before they enter this context.
+- Never downgrade the model for `ros2-reviewer` or `robot-safety-reviewer` — they inherit the session model.
