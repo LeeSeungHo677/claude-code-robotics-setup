@@ -13,7 +13,7 @@ allowed-tools: Bash, Read, Write
 
 ## Overview
 Isaac Lab 기반 강화학습 파이프라인 설계 및 실행.
-AGIBOT D1(4족), X2(휴머노이드), G2(매니퓰레이션) 대응.
+4족·휴머노이드·매니퓰레이터 대응.
 클라우드 GPU 기반 학습 (cloud-gpu-job 스킬 연동).
 
 ## 지원 알고리즘
@@ -42,7 +42,6 @@ def reward_function(obs, action):
 - GPU 병렬 물리 시뮬레이션 (수천 개 환경 동시)
 - RL + IL 동시 지원
 - 도메인 랜덤화 도구 내장
-- AGIBOT Genie Sim 3.0과 병행 사용 가능
 
 ## 학습 파이프라인
 Isaac Lab 환경 설계

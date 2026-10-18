@@ -12,7 +12,7 @@ allowed-tools: Bash, Read, Write
 # Sim-to-Real Check Skill
 
 ## Overview
-시뮬레이션 학습 정책을 실제 AGIBOT 로봇에 배포하기 전
+시뮬레이션 학습 정책을 실제 로봇에 배포하기 전
 sim-to-real 갭 검증 및 체크리스트 실행.
 
 ## Sim-to-Real 갭 주요 원인
@@ -51,14 +51,14 @@ push_force: [0, 5]
 7. 센서 데이터 정상 수신 확인
 8. 실제 환경 데이터로 재학습 계획 수립
 
-## AGIBOT 배포 프로세스
+## 배포 프로세스 (예시)
 Isaac Lab 학습
   → 체크리스트 통과
-  → Policy Server 배포 (클라우드)
-  → AGIBOT 로봇 연결 (AimRT)
+  → Policy Server 배포 (클라우드 또는 온보드)
+  → 로봇 연결 (사용 중인 미들웨어)
   → 저속 테스트 실행
   → 성능 데이터 수집
-  → AWS S3 저장 → SageMaker 재학습
+  → 데이터 저장 → 재학습
 
 ## 실제 환경 데이터 수집
 - 실패 케이스 원인 분석 필수

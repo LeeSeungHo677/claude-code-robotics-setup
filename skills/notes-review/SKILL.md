@@ -30,7 +30,7 @@ description: >
 
 - **코드·git**: 작업지시서 항목이 이미 구현됐는지 `git log`·소스로 확인
 - **로봇 문서**: `~/knowledge/robots/` 의 하드웨어·SDK 분석과 어긋나는지
-- **실기 기록**: `docs/robot-sdk/g2-onsite-check-*.md` 같은 현장 확인 기록
+- **실기 기록**: `docs/robot-sdk/<robot>-onsite-check-*.md` 같은 현장 확인 기록
 - 노트가 맞고 코드가 낡았을 수도 있다. **어느 쪽이 최신인지 근거로 판정한다**
 
 ## 다룰 때 주의

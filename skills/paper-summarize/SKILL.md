@@ -38,7 +38,7 @@ claude "위 논문 중 Isaac Lab 구현에 적합한 것 분석해줘"
 - 핵심 기여 (2-3줄)
 - 방법론 요약
 - 실험 결과 (주요 수치)
-- AGIBOT 적용 가능성
+- 우리 로봇 적용 가능성
 - 원문 링크
 
 ## Output Protocol
@@ -56,7 +56,7 @@ claude "위 논문 중 Isaac Lab 구현에 적합한 것 분석해줘"
 ## Gotchas
 - Antigravity CLI(agy)로 검색 후 Claude로 분석 (비용 최적화)
 - 날짜 필터 항상 포함 (2024년 이후)
-- AGIBOT 관련성 항상 명시
+- 우리 로봇·과제와의 관련성 항상 명시
 - 논문 링크 반드시 포함 (arXiv ID 또는 URL)
 
 ## References

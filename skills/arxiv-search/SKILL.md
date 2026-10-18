@@ -45,8 +45,8 @@ agy --print "최근 VLA Vision-Language-Action 로봇 manipulation 논문 정리
 # sim-to-real 특화
 agy --print "2025 sim-to-real transfer robotics 최신 연구 동향"
 
-# AGIBOT 관련
-agy --print "AgiBot GO-1 GO-2 ViLLA 관련 최신 논문 및 인용 연구"
+# 특정 모델 계열 추적
+agy --print "OpenVLA 를 인용한 최신 논문과 후속 연구"
 
 ## 저장 구조
 ~/knowledge/papers/
@@ -72,7 +72,7 @@ crontab        0 6 * * *   ~/knowledge/scripts/daily_paper_collection.sh
 2. 주간 동향 정리
 3. 특정 저자/연구소 추적
 4. 학회별 주요 논문 수집
-5. AGIBOT 관련 인용 논문 추적
+5. 관심 모델의 인용 논문 추적
 
 ## Gotchas
 - 검색은 Antigravity CLI(agy), 분석은 Claude (비용 최적화)
