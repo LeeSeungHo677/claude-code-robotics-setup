@@ -115,6 +115,16 @@ CASES = [
 ]
 
 
+# ── 2026-10-18 추가: 외부 요청(WebFetch/WebSearch/MCP) 인자 ─────────────────
+CASES += [
+    (DENY, "WebFetch URL 쿼리에 토큰", ("WebFetch", {"url": "https://api.example.com/x?token=" + FAKE_GH, "prompt": "p"})),
+    (DENY, "WebSearch 질의에 키", ("WebSearch", {"query": "why does " + FAKE_ANTHROPIC + " fail"})),
+    (DENY, "MCP 인자 중첩에 키", ("mcp__notion__create", {"page": {"body": ["note", FAKE_AWS]}})),
+    (PASS, "WebFetch 평범한 URL (example.com 포함)", ("WebFetch", {"url": "https://example.com/docs", "prompt": "요약"})),
+    (PASS, "MCP 인자에 placeholder", ("mcp__x__y", {"api_key": "YOUR_API_KEY"})),
+    (PASS, "WebSearch 일반 질의", ("WebSearch", {"query": "ros2 humble qos depth"})),
+]
+
 def main():
     fails = 0
     for want, label, (tool, ti) in CASES:

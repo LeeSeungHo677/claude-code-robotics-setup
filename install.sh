@@ -55,13 +55,13 @@ run mkdir -p "$CLAUDE_DIR"
 
 # ── 1) 기존 구성 백업 ────────────────────────────────────────────────────────
 NEED_BACKUP=0
-for d in skills agents commands hooks bin CLAUDE.md; do
+for d in skills agents commands hooks bin eval-harness CLAUDE.md; do
   [ -e "$CLAUDE_DIR/$d" ] && NEED_BACKUP=1
 done
 if [ "$NEED_BACKUP" = 1 ]; then
   say "── 기존 구성 백업 → $BACKUP"
   run mkdir -p "$BACKUP"
-  for d in skills agents commands hooks bin CLAUDE.md settings.json; do
+  for d in skills agents commands hooks bin eval-harness CLAUDE.md settings.json; do
     [ -e "$CLAUDE_DIR/$d" ] && run cp -a "$CLAUDE_DIR/$d" "$BACKUP/"
   done
   say ""
@@ -71,7 +71,8 @@ fi
 say "── 구성 설치"
 # bin/ 은 세션 시작 배너가 경로로 안내하는 스크립트가 들어 있다.
 # 빼면 배너가 없는 파일을 광고하게 된다.
-for d in skills agents commands hooks bin; do
+# eval-harness/ 의 skills 는 ../skills 심볼릭 링크라 설치 위치에서도 그대로 동작한다.
+for d in skills agents commands hooks bin eval-harness; do
   if [ "$MODE" = link ]; then
     run rm -rf "$CLAUDE_DIR/$d"
     run ln -s "$SRC/$d" "$CLAUDE_DIR/$d"

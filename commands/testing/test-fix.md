@@ -21,7 +21,7 @@ Diagnose and fix failing tests in the project.
 5. Apply the fix:
    - Update assertions to match new behavior if the change was intentional.
    - Fix the source code if the test caught a real bug.
-   - Add retry logic or increase timeouts for flaky tests.
+   - Flaky test: do NOT add retries or raise timeouts/sleeps to hide it. Measure first (run it N times; ROS: `colcon test --packages-select <pkg> --retest-until-fail 20`), classify the cause (timing/race, shared state or test order, external dependency, DDS cross-talk — isolate with a unique `ROS_DOMAIN_ID`), then fix the cause (wait on a condition instead of sleeping). Report the before/after failure rate.
    - Update mocks if dependency interfaces changed.
 6. Re-run only the fixed tests to verify: `<runner> --testPathPattern <file>`.
 7. Run the full suite to check for regressions.

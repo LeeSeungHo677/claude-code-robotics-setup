@@ -183,3 +183,4 @@ For HTTP-based servers, use the SSE transport for streaming responses to clients
 - [ ] Server handles graceful shutdown on SIGINT/SIGTERM
 - [ ] Tools are composable (do one thing well) rather than monolithic
 - [ ] Client configuration documented with required environment variables
+- [ ] "Lethal trifecta" check: does this server (or its combination with others) **read private data + process untrusted content + communicate externally**? If all three, remove one leg (e.g. no outbound tool while handling fetched content) — labeling/detection alone does not close it

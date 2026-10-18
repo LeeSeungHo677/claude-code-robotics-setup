@@ -74,6 +74,8 @@ Isaac Lab 환경 설계
 - sim-to-real: 도메인 랜덤화 필수
 - 학습 불안정 시 learning rate 먼저 확인
 - 중간 체크포인트 S3 저장 필수 (클라우드 중단 대비)
+- **관측 정규화 통계(running mean/std, 예: SB3 `VecNormalize`)를 정책 가중치와 함께 저장·로드한다.**
+  빠뜨리면 평가·실기에서 입력 스케일이 달라져 "학습은 됐는데 배포하면 엉뚱하게 움직인다". 평가 땐 통계 갱신을 끈다
 
 ## References
 - ~/knowledge/papers/rl/ — RL 관련 논문

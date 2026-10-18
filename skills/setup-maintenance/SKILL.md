@@ -169,6 +169,9 @@ for h in hooks/*.py; do python3 -m py_compile "$h" || echo "✗ $h"; done; rm -r
 
 **훅·권한·스킬 변경은 새 세션부터 적용된다.** 같은 세션에서 확인하려 하지 않는다.
 
+**스킬 description 을 바꿨으면 라우팅 평가를 돌린다**: `~/.claude/eval-harness/README.md` 참고 (`claude plugin eval`, 케이스당 ≈ $0.17).
+평가는 격리 세션이라 같은 세션에서도 바로 돌릴 수 있다. 오발동·미발동을 발견한 실제 요청은 케이스로 추가한다.
+
 ## 정기 점검
 
 `/setup:audit` 로 구성 점검, `/setup:tech-scan <도메인>` 으로 신기술 조사를 돌린다.
@@ -182,3 +185,10 @@ for h in hooks/*.py; do python3 -m py_compile "$h" || echo "✗ $h"; done; rm -r
 
 `MANIFEST.md` 를 갱신한다 — 무엇을 추가했고 출처가 어디인지.
 이 기록이 없으면 6개월 뒤에 어느 것이 직접 쓴 것이고 어느 것이 외부에서 온 것인지 모른다.
+
+항목에는 **무엇을·왜·출처** 외에 두 가지를 더 쓴다:
+- **기각한 대안** — 같은 제안이 다시 왔을 때 재조사하지 않도록
+- **재검토 조건** — 무엇이 바뀌면 이 결정을 다시 볼지 (예: "코드 공개되면", "로그에 기록이 쌓이면")
+
+메모리(`projects/*/memory/`)에는 회차·개수·날짜처럼 **낡는 숫자를 쓰지 않는다** — 이력 파일(`MANIFEST.md` 를 쓴다면 거기)에 둔다.
+`/setup:audit` 가 오래 갱신되지 않은 project/reference 메모리를 표시한다 (하네스가 `metadata.modified` 를 자동 기록).

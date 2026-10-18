@@ -18,8 +18,11 @@ import os
 import re
 import sys
 
-# colcon/ament 가 생성하는 디렉토리
-GENERATED = re.compile(r"(^|/)(build|install|log)/")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from hooklib import generated_root, log_hook_error  # noqa: E402
+
+# 생성물 판정은 hooklib.generated_root — 경로 정규화 + COLCON_IGNORE 표식 확인 (2026-10-18).
+# 예전엔 이름 정규식만 봐서 웹 프로젝트 build/, src/pkg/log/ 도 막았다.
 
 # ROS 설치본 / 파이썬 site-packages 안의 ROS 패키지
 SYSTEM_ROS = re.compile(r"^/opt/ros/|(^|/)site-packages/(rclpy|rcl_interfaces|geometry_msgs|"
@@ -38,8 +41,9 @@ def workspace_hint(path):
 def main():
     try:
         data = json.load(sys.stdin)
-    except Exception:
-        sys.exit(0)
+    except Exception as e:
+        log_hook_error("ros2-workspace-guard", f"stdin 파싱 실패: {e}")
+        sys.exit(0)   # fail-open (의도) — 대신 기록한다
 
     if data.get("tool_name") not in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
         sys.exit(0)
@@ -50,7 +54,7 @@ def main():
         sys.exit(0)
 
     reason = None
-    if GENERATED.search(path):
+    if generated_root(path, data.get("cwd")):
         reason = (f"[ros2-workspace-guard] colcon 생성물은 편집해도 다음 빌드에서 사라집니다.\n"
                   f"  경로: {path}" + workspace_hint(path))
     elif SYSTEM_ROS.search(path):

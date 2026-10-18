@@ -188,6 +188,34 @@ def main():
     check("도메인 결과가 Claude 컨텍스트에도 감", "도메인" in ctx, ctx[:100])
     shutil.rmtree(t, ignore_errors=True)
 
+    # 10) HANDOFF.md 인수인계 주입 (2026-10-18)
+    t = tempfile.mkdtemp()
+    os.makedirs(os.path.join(t, ".claude"))
+    with open(os.path.join(t, ".claude", "HANDOFF.md"), "w", encoding="utf-8") as f:
+        f.write("# HANDOFF\n\n## 고정 (압축 후에도 다시 주입된다)\n- 대상: 실기 arm1 / ns robot1\n"
+                "- 바꾼 파라미터: max_vel 0.5 → 0.3 (진동)\n\n## 목표\n- 파지 성공률 80%\n\n"
+                "## 결정 (이유)\n- ACT 유지 — 비밀결정XYZ\n\n## 다음 1개\n- 그리퍼 지연 측정\n")
+
+    def emit_src(src):
+        r = subprocess.run([sys.executable, HOOK], input=json.dumps({"cwd": t, "source": src}),
+                           capture_output=True, text=True, timeout=15)
+        return json.loads(r.stdout) if r.stdout.strip() else None
+
+    out = emit_src("startup")
+    ctx = out["hookSpecificOutput"]["additionalContext"] if out else ""
+    check("HANDOFF — 시작 시 고정·목표·다음 1개 주입", all(s in ctx for s in ("실기 arm1", "파지 성공률", "그리퍼 지연")), ctx[-200:])
+    check("HANDOFF — 고르지 않은 절(결정)은 안 넣음", "비밀결정XYZ" not in ctx, ctx[-200:])
+    check("HANDOFF — 예산 (기본 + 900자)", len(ctx) <= MAX_CHARS + 2 + 900, f"{len(ctx)}자")
+    out = emit_src("compact")
+    ctx = out["hookSpecificOutput"]["additionalContext"] if out else ""
+    check("HANDOFF — 압축 직후 고정 사항 재주입", "실기 arm1" in ctx and "그리퍼 지연" in ctx, ctx[:200])
+    check("HANDOFF — 압축 직후엔 목표·배너 생략", "파지 성공률" not in ctx and "systemMessage" not in (out or {}), ctx[:200])
+    shutil.rmtree(t, ignore_errors=True)
+    t = tempfile.mkdtemp()
+    out = emit_src("compact")
+    check("HANDOFF 없음 + 압축 → 아무것도 안 냄", out is None, str(out)[:100])
+    shutil.rmtree(t, ignore_errors=True)
+
     # 9) 잘못된 stdin — 조용히 통과 (훅 버그가 세션을 막으면 안 된다)
     r = subprocess.run([sys.executable, HOOK], input="not json",
                        capture_output=True, text=True, timeout=15)

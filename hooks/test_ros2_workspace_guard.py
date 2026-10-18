@@ -22,10 +22,12 @@ HOOK = os.path.join(HERE, "ros2-workspace-guard.py")
 DENY, PASS = "deny", "pass"
 
 
-def decide(path, tool_name="Write"):
+def decide(path, tool_name="Write", cwd=None):
     """훅을 1회 실행하고 deny / pass 중 하나를 반환."""
-    payload = json.dumps({"tool_name": tool_name,
-                          "tool_input": {"file_path": path, "content": "x = 1\n"}})
+    body = {"tool_name": tool_name, "tool_input": {"file_path": path, "content": "x = 1\n"}}
+    if cwd:
+        body["cwd"] = cwd
+    payload = json.dumps(body)
     r = subprocess.run([sys.executable, HOOK], input=payload,
                        capture_output=True, text=True, timeout=10)
     for line in r.stdout.splitlines():
@@ -77,8 +79,43 @@ CASES = [
 ]
 
 
+def disk_cases():
+    """실제 디렉토리로 검증하는 케이스 (2026-10-18 추가).
+
+    디렉토리가 디스크에 있으면 colcon 이 만든 COLCON_IGNORE 표식으로 판정한다 —
+    이름 정규식만 보던 시절의 오탐(웹 build/, src/pkg/log/)을 여기서 잡는다.
+    """
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="wsguard-")
+    ws = os.path.join(tmp, "ws")
+    for d in ("build", "install", "log"):
+        os.makedirs(os.path.join(ws, d, "pkg"))
+        open(os.path.join(ws, d, "COLCON_IGNORE"), "w").close()
+    os.makedirs(os.path.join(ws, "src", "pkg", "log"))
+    web = os.path.join(tmp, "web")
+    os.makedirs(os.path.join(web, "build"))                    # 표식 없는 build/ (웹 산출물)
+    return tmp, [
+        (DENY, "표식 있는 build/", os.path.join(ws, "build", "pkg", "x.cmake"), None),
+        (DENY, "표식 있는 install/ (상대경로 + cwd)", "install/pkg/node.py", ws),
+        (DENY, "정규화하면 build/ (src/../build)", os.path.join(ws, "src", "..", "build", "pkg", "y"), None),
+        (PASS, "정규화하면 src/ (build/../src)", os.path.join(ws, "build", "..", "src", "pkg", "z.py"), None),
+        (PASS, "패키지 안의 log/ 폴더 (표식 없음)", os.path.join(ws, "src", "pkg", "log", "handler.py"), None),
+        (PASS, "웹 프로젝트 build/ (표식 없음)", os.path.join(web, "build", "index.html"), None),
+    ]
+
+
 def main():
     fails = 0
+    tmp, extra = disk_cases()
+    for want, label, path, cwd in extra:
+        got = decide(path, "Write", cwd)
+        if got == want:
+            print("  PASS  [%-4s] %s" % (want, label))
+        else:
+            print("  FAIL  [%s→%s] %s  (%s)" % (want, got, label, path))
+            fails += 1
+    import shutil
+    shutil.rmtree(tmp, ignore_errors=True)
     for i, (want, label, path) in enumerate(CASES):
         # 한 케이스는 Edit 도구로도 걸리는지 확인한다
         tool = "Edit" if label.startswith("Edit") else "Write"
@@ -88,7 +125,8 @@ def main():
         else:
             print("  FAIL  [%s→%s] %s  (%s)" % (want, got, label, path))
             fails += 1
-    print("\n%d/%d 통과" % (len(CASES) - fails, len(CASES)))
+    total = len(CASES) + len(extra)
+    print("\n%d/%d 통과" % (total - fails, total))
     sys.exit(1 if fails else 0)
 
 

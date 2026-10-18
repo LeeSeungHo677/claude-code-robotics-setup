@@ -4,7 +4,8 @@ description: >
   시연 데이터로 로봇 정책 학습 (모방학습·행동복제). TRIGGER when the user collects teleop demonstrations, works with
   LeRobot/lerobot datasets, trains ACT (Action Chunking Transformer), Diffusion Policy, or VQ-BeT,
   designs action chunking and observation spaces, evaluates a policy on hardware — or hits '학습은
-  되는데 로봇에선 실패 / 중간에 멈춘다 / 한 시작 자세에서만 된다'.
+  되는데 로봇에선 실패 / 중간에 멈춘다 / 한 시작 자세에서만 된다 / 성공한 뒤 물체를 다시 건드린다 /
+  동작이 떨린다 / 정책이 왜 이렇게 행동하는지'.
 ---
 
 # 모방학습 (Imitation Learning)
