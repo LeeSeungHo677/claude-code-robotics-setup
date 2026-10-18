@@ -114,7 +114,7 @@ fi
 
 say "── 검증"
 python3 - "$CLAUDE_DIR" <<'PY'
-import json, os, sys, glob
+import json, os, re, shlex, sys, glob
 d = sys.argv[1]
 ok = True
 
@@ -125,7 +125,15 @@ if os.path.isfile(sp):
     for ev in s.get("hooks", {}).values():
         for g in ev:
             for h in g["hooks"]:
-                p = os.path.expandvars(h["command"].split(None, 1)[1].strip('"'))
+                cmd = h["command"]
+                # 셸 제어문이 든 인라인 훅(외부 도구가 심은 형태)은 경로 검사 대상이 아니다
+                if re.search(r"(^|\s)(if|case|for|while)\s", cmd) or re.search(r"[;|&]", cmd):
+                    continue
+                try:
+                    # 마지막 토큰은 인자일 수 있다(`bash x.sh session`) → '/' 가 든 마지막 토큰을 경로로 본다
+                    p = os.path.expandvars([t for t in shlex.split(cmd) if "/" in t][-1])
+                except (ValueError, IndexError):
+                    continue
                 if not os.path.isfile(p):
                     print("  ✗ 훅 없음: %s" % p); ok = False
     print("  훅 경로 확인 완료")
