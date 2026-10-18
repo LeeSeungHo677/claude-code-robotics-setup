@@ -172,7 +172,7 @@ def main():
     # 8) 도메인 매칭 — README·디렉토리명을 스킬 설명과 대조해 고른다
     t = tempfile.mkdtemp()
     with open(os.path.join(t, "README.md"), "w", encoding="utf-8") as f:
-        f.write("# X2 humanoid dance pipeline\n"
+        f.write("# humanoid dance pipeline\n"
                 "IsaacLab RL training, ONNX export, Orin deployment, retargeting from AMASS.\n")
     os.makedirs(os.path.join(t, "03_rl_training"), exist_ok=True)
     out, _ = emit(t)

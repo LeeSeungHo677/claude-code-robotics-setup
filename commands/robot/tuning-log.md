@@ -19,7 +19,7 @@ description: 파라미터 튜닝 세션을 기록하고 비교 — 무엇을 바
 ## 2026-08-15 14:30 — 좁은 통로 통과 실패 개선
 
 **대상**: nav2_params.yaml / local_costmap.inflation_layer
-**환경**: 로봇 D1 / 창고 B동 / 실기
+**환경**: 로봇 <이름> / <현장> / 실기
 **재현**: bags/2026-08-15_narrow_corridor.mcap
 
 | 파라미터 | 이전 | 이후 | 이유 |
