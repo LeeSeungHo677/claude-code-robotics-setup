@@ -95,8 +95,11 @@ def main():
 
     # 7) 필터
     # 6-1) 하네스·루프 섹션
-    for must in ("하네스", "루프", "run_in_background", "/rewind", "crontab -l",
-                 "~/knowledge"):
+    # crontab -l 줄은 크론 항목이 있을 때만 그려진다 — 비어 있는 환경에선 요구하지 않는다
+    musts = ["하네스", "루프", "run_in_background", "/rewind", "~/knowledge"]
+    if real:
+        musts.append("crontab -l")
+    for must in musts:
         check(f"'{must}' 포함", must in full, full[-400:])
 
     one, rc = run("캘리브레이션")
