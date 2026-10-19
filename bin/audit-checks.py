@@ -8,10 +8,14 @@
   4. 우리 것이 아닌 훅   ~/.claude/hooks 밖을 가리키는 훅과, 그 스크립트의 네트워크 호출
   5. 훅 fail-open 기록   ~/.claude/logs/hook-errors.log (최근 30일)
   6. 낡은 메모리         project/reference 유형인데 90일 넘게 갱신 안 된 것
+  7. 배포판 drift        공개 배포판(dist-sync.json 의 dist)과 bin/hooks/commands/agents/skills 를 비교.
+                         의도적 차이는 dist-sync.json 의 intentional 에 적어야 경고가 안 뜬다. 설정 파일이 없으면 건너뜀
 
 자동으로 고치지 않는다. 보고만 한다.   실행: python3 ~/.claude/bin/audit-checks.py
 """
 
+import filecmp
+import fnmatch
 import glob
 import importlib.util
 import json
@@ -166,6 +170,82 @@ def check_memory():
     return out or ["- 90일 넘은 project/reference 메모리 없음"]
 
 
+IGNORE_NAMES = {"__pycache__", ".pytest_cache", ".DS_Store"}     # 디렉터리·파일 이름 단위
+IGNORE_SUFFIX = (".pyc", ".orig", ".rej")
+
+
+def _skip(rel, name, patterns):
+    """내장 무시 이름/확장자 + 설정 ignore (fnmatch — 이름 또는 root 기준 상대경로에 매칭)."""
+    return (name in IGNORE_NAMES or name.endswith(IGNORE_SUFFIX)
+            or any(fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(name, g) for g in patterns))
+
+
+def _tree(root, dirs, patterns):
+    """root 아래 dirs(하위 경로 가능, 예: eval-harness/evals)의 파일을 {상대경로: 절대경로} 로.
+    없는 dir 은 조용히 건너뛴다. 심볼릭 링크 디렉터리는 따라가지 않는다."""
+    out = {}
+    for d in dirs:
+        for cur, subdirs, files in os.walk(os.path.join(root, d)):
+            subdirs[:] = [x for x in subdirs if not _skip(os.path.relpath(os.path.join(cur, x), root), x, patterns)]
+            for f in files:
+                p = os.path.join(cur, f)
+                rel = os.path.relpath(p, root)
+                if not _skip(rel, f, patterns):
+                    out[rel] = p
+    return out
+
+
+def check_dist_drift(local=C, cfg_path=None):
+    """로컬 ↔ 공개 배포판. 허용목록(dist-sync.json 의 intentional)에 없는 차이만 ✗ 로 보고한다.
+
+    허용목록 키가 '/' 로 끝나면 그 디렉터리 전체. 허용목록에 있는데 지금은 차이가 없는 항목도
+    알린다 — 목록이 낡으면 실제 drift 를 가리게 된다. 설정 파일이 없으면 SKIP (배포판 없는 세팅)."""
+    cfg_path = cfg_path or os.path.join(local, "dist-sync.json")
+    if not os.path.isfile(cfg_path):
+        return [f"- SKIP — `{cfg_path}` 없음 (공개 배포판을 두지 않는 세팅이면 정상)"]
+    try:
+        cfg = json.load(open(cfg_path, encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return [f"- ✗ `{cfg_path}` 을 읽지 못함: {e}"]
+    dist = os.path.expanduser(cfg.get("dist") or "")
+    if not dist or not os.path.isdir(dist):
+        return [f"- SKIP — 배포판 경로 없음: `{dist or '(dist 미지정)'}`"]
+    dirs = cfg.get("dirs") or ["bin", "hooks", "commands", "agents", "skills"]
+    ignore = list(cfg.get("ignore") or [])                 # fnmatch 패턴 — 이름 또는 상대경로
+    allow = cfg.get("intentional") or {}
+    L, D = _tree(local, dirs, ignore), _tree(dist, dirs, ignore)
+
+    def allowed(rel):
+        return next((k for k in allow if (rel.startswith(k) if k.endswith("/") else rel == k)), None)
+
+    diffs = []                                       # (종류, 상대경로, 비고)
+    for rel in sorted(set(L) | set(D)):
+        if rel in L and rel in D:
+            if not filecmp.cmp(L[rel], D[rel], shallow=False):
+                newer = "로컬" if os.path.getmtime(L[rel]) > os.path.getmtime(D[rel]) else "배포판"
+                diffs.append(("내용 다름", rel, f"mtime 상 {newer}이 최신"))
+        elif rel in L:
+            diffs.append(("로컬에만", rel, ""))
+        else:
+            diffs.append(("배포판에만", rel, ""))
+    used, flagged = set(), []
+    for kind, rel, note in diffs:
+        k = allowed(rel)
+        used.add(k) if k else flagged.append((kind, rel, note))
+    stale = [k for k in allow if k not in used]
+    out = [f"- 비교: `{dist}` ↔ `{local}` ({', '.join(dirs)}) — 파일 {len(set(L) | set(D))}개, "
+           f"차이 {len(diffs)}개 중 허용 {len(diffs) - len(flagged)}개"]
+    if flagged:
+        out.append(f"- ✗ 허용 외 차이 {len(flagged)}개 — 로컬이 새 것이면 배포판 PR, 배포판이 새 것이면 역반영(patch 단위), "
+                   f"의도적이면 `dist-sync.json` 에 사유와 함께 적는다")
+        out += [f"  ✗ {kind}  `{rel}`" + (f" ({note})" if note else "") for kind, rel, note in flagged]
+    else:
+        out.append("- 허용 외 차이 없음")
+    if stale:
+        out.append(f"- 허용목록인데 지금은 차이 없음 {len(stale)}개 (지워도 된다): " + ", ".join(f"`{k}`" for k in stale))
+    return out
+
+
 def main():
     settings = json.load(open(os.path.join(C, "settings.json"), encoding="utf-8"))
     sections = [
@@ -175,6 +255,7 @@ def main():
         ("4. 우리 것이 아닌 훅", check_foreign_hooks(settings)),
         ("5. 훅 fail-open 기록", check_hook_errors()),
         ("6. 낡은 메모리", check_memory()),
+        ("7. 배포판 drift", check_dist_drift()),
     ]
     for title, lines in sections:
         print(f"### {title}")
