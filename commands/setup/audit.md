@@ -12,7 +12,8 @@ python3 ~/.claude/bin/audit-checks.py
 ```
 정책↔강제 일치(CLAUDE.md 의 하드웨어 명령이 ask/guard 에 걸리고 allow 에 없는가), 고정 컨텍스트 크기 예산,
 안 쓰는 스킬, 우리 것이 아닌 훅과 그 네트워크 호출, 훅 fail-open 기록(`logs/hook-errors.log`),
-90일 넘은 project/reference 메모리. 결과의 ✗ 는 그대로 보고서 "깨진 것"·"표류" 로 옮긴다.
+90일 넘은 project/reference 메모리, 공개 배포판을 두고 있다면 그와의 drift(허용목록 `~/.claude/dist-sync.json`,
+파일이 없으면 건너뜀). 결과의 ✗ 는 그대로 보고서 "깨진 것"·"표류" 로 옮긴다.
 도구 실행 기록은 `~/.claude/logs/tools-YYYY-MM.jsonl` — 사고 조사·파라미터 이력 확인에 쓴다.
 
 ### 1. 구조 유효성 (자동 검증)
