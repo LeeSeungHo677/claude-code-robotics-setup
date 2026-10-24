@@ -145,3 +145,21 @@ go tool cover -func=cover.out
 - Ignoring flaky tests instead of fixing them
 - Testing private methods directly
 - Giant test setup that obscures intent
+
+## Verify Before Claiming Done
+
+Run the command that proves the claim in this turn and read its output. A previous run or "should pass" is not evidence.
+
+| Claim | Proof | Not proof |
+|-------|-------|-----------|
+| Tests pass | Test run output: 0 failures | Earlier run, partial subset |
+| Build succeeds | Build command exit 0 | Linter clean, logs look fine |
+| Bug fixed | Original symptom re-run, now passes | Code changed |
+| Regression test works | Revert the fix → test fails → restore → passes | Test passes once |
+| Subagent finished | `git diff` shows the change, you ran its tests | Agent says "success" |
+| Requirements met | Each requirement checked one by one | Tests pass |
+
+Words like "should", "probably", "seems to" in a completion report mean verification was skipped.
+
+<!-- 출처: obra/superpowers verification-before-completion (MIT), 2026-10-25 요약 반영 -->
+
