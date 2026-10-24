@@ -100,6 +100,19 @@ Categorize the failure using the common non-determinism taxonomy:
      fi
      ```
      Do not pass `--random-order` or `--randomly-seed` unless the corresponding plugin advertises the option.
+   - **Find the polluter** — when a stray file/dir/state appears after the suite, run each test file alone and check after each (adapted from obra/superpowers `find-polluter.sh`, MIT):
+     ```bash
+     ARTIFACT=<path-that-should-not-exist>   # e.g. .git, /tmp/foo.lock, test.db
+     for f in $(find tests -name 'test_*.py' | sort); do
+       [ -e "$ARTIFACT" ] && { echo "already present before $f — clean it first"; break; }
+       out=$(pytest -q "$f" 2>&1)
+       echo "$out" | tail -1 | grep -qE '[0-9]+ (passed|failed|error)' \
+         || echo "WARN: $f did not run — result for this file is meaningless"
+       [ -e "$ARTIFACT" ] && { echo "POLLUTER: $f"; break; }
+     done
+     ```
+     A failing test is fine — a polluter may fail. Don't use the exit code to tell "test failed" from "pytest broke": both can be 1, hence the summary-line check. On ROS machines pytest often breaks at startup because a ROS pytest plugin (`launch_testing` etc.) clashes with the pip pytest → retry with `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`.
+     Swap the `find`/runner for `npx vitest run "$f"` etc. Only run against a scratch checkout if tests write outside the repo.
 
 3. **Clock & Timezone Skew**:
    - Symptom: Fails around midnight UTC, during month/year rollovers, or in different local timezones.
