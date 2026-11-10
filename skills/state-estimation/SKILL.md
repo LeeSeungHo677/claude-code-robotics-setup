@@ -99,3 +99,7 @@ SLAM 이 지도를 만드는 것이라면, 로컬라이제이션은 **주어진 
 - 로컬라이제이션 신뢰도가 임계 이하로 떨어지면 **자율 주행을 중단**하는 정책을 명시한다.
   위치를 모르는 채로 계속 움직이는 것이 가장 위험하다.
 - 정지 시 ZUPT(zero velocity update)를 적용하면 드리프트가 크게 준다.
+
+## 참고 교재 (무료)
+
+- [Introduction to Robotics and Perception](https://www.roboticsbook.org/) (Dellaert & Hutchinson) — 베이즈 필터·factor graph 를 GTSAM 코드와 함께. factor graph 기반 추정을 처음 잡을 때.

@@ -100,3 +100,7 @@ description: >
 - 예상치 못한 접촉 감지 → 정지 경로는 **제어 루프와 독립**이어야 한다.
 - 그리퍼는 전원이 나가도 물체를 놓지 않는 구조(기계식 자기유지)를 권장한다.
   전원 차단 시 물체가 떨어지면 그 자체가 사고다.
+
+## 참고 교재 (무료)
+
+- [Robotic Manipulation](https://manipulation.mit.edu/) (Tedrake, MIT) — 인지·파지·접촉·힘 제어를 Drake 노트북으로. 개념 정리용이고, 코드는 Drake API 라 ROS 2/MoveIt 스택에 그대로 옮겨지지 않는다.

@@ -114,3 +114,7 @@ description: >
 **관절 순서·부호 검증**은 배포 전 필수 체크다. 시뮬과 실기의 관절 인덱스 순서가 다르면
 정책은 정상인데 로봇이 즉시 넘어진다. 관절 하나씩 명령을 보내 실제로 어느 관절이 움직이는지
 눈으로 확인한다.
+
+## 참고 교재 (무료)
+
+- [Underactuated Robotics](https://underactuated.mit.edu/) (Tedrake, MIT) — 보행의 동역학(ZMP·hybrid dynamics·안정성). RL 보상이 왜 그 항을 갖는지 물리로 설명할 때.
