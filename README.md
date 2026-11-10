@@ -207,6 +207,13 @@ CLAUDE_DIR=/tmp/try ./install.sh   # 다른 위치에 시험 설치
 2. **새 세션을 연다.** 훅·권한·스킬 변경은 현재 세션에 적용되지 않는다.
 3. 아무 로봇 문제나 평소 말투로 물어본다 — 스킬 이름을 외울 필요 없다.
 
+**선택 플러그인 (기본 꺼짐)** — `settings.json` 에 마켓만 등록돼 있고 `enabledPlugins` 는 `false` 다. 필요할 때 `/plugin` 에서 켠다.
+
+| 플러그인 | 용도 | 주의 |
+|---|---|---|
+| [genjutsu](https://github.com/AThevon/genjutsu) (MIT) | 웹 UI 디자인 스킬 (`cast`·`paint`, ui-ux-pro-max 포함) | 4.1 `bunshin` 은 실행당 토큰 수백만 — 실행 전 비용 확인 게이트 있음 |
+| [text-to-cad](https://github.com/earthtojake/text-to-cad) (MIT) | CAD·URDF·도면 스킬 + MCP `cad` (`uvx cadgen`) | 사용 통계 기본 전송 → `env.CADGEN_TELEMETRY=0` 으로 끔. `urdf`·`sdf` 스킬이 로봇 스킬과 라우팅이 겹칠 수 있다 |
+
 ### 요구사항
 
 - Claude Code

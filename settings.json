@@ -207,5 +207,27 @@
       }
     ]
   },
-  "alwaysThinkingEnabled": true
+  "alwaysThinkingEnabled": true,
+  "extraKnownMarketplaces": {
+    "genjutsu": {
+      "source": {
+        "source": "github",
+        "repo": "AThevon/genjutsu"
+      }
+    },
+    "earthtojake": {
+      "source": {
+        "source": "github",
+        "repo": "earthtojake/text-to-cad",
+        "ref": "latest"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "genjutsu@genjutsu": false,
+    "text-to-cad@earthtojake": false
+  },
+  "env": {
+    "CADGEN_TELEMETRY": "0"
+  }
 }
