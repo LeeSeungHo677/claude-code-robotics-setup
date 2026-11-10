@@ -14,8 +14,9 @@ license: Complete terms in LICENSE.txt
 > 다만 "generic AI aesthetics 회피"(system-ui/Inter 탈출, 의도적 폰트·색 선택)는
 > **모든 화면에 적용된다.**
 >
-> 모션 연출·3D·스크롤 인터랙션용 스킬을 따로 설치했다면 **그것도 같은 범위**다 —
-> 소개·랜딩·데모에 쓰고, 관제 화면에는 열지 않는다.
+> **`genjutsu:cast` / `genjutsu:paint`**(플러그인, 켜 두었다면)도 같은 범위에 속한다 — 모션 연출,
+> 3D(Three.js/R3F), 스크롤 인터랙션, 아트디렉션이 필요한 **소개·랜딩·데모**에 쓴다.
+> 관제 화면에 이것을 열면 `design-system` 이 자제하라고 명시한 방향과 정면으로 부딪힌다.
 
 This skill guides creation of distinctive, production-grade frontend interfaces that avoid generic "AI slop" aesthetics. Implement real working code with exceptional attention to aesthetic details and creative choices.
 
