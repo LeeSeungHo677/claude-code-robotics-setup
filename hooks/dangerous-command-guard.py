@@ -145,7 +145,11 @@ ASK_RULES = [
      "rosbag / 데이터셋 / 주행기록 / 캘리브레이션 삭제 — 재수집이 어려운 데이터일 수 있습니다"),
     # 재귀 삭제는 대상과 무관하게 확인을 받는다. 한 글자 오타가 디렉토리 하나를 통째로 날린다.
     (re.compile(r"\brm\s+(-\S*\s+)*-\S*[rR]"), "재귀 삭제(rm -r) — 디렉토리 전체가 사라집니다"),
+]
 
+# 실기를 움직이는 명령. 사유 뒤에 HW_HINT(다음에 할 일)가 붙는다 — 확인창이 '왜 막혔나' 만이 아니라
+# '대신 무엇을 하나' 를 말해야 같은 명령을 재시도하지 않는다 (출처: OpenAI harness engineering — 린트 메시지를 수정 지침으로).
+HW_ASK_RULES = [
     # ── 로봇 실기 구동 ─────────────────────────────────────────────────────
     # settings.json 의 ask 규칙과 중복이지만, 훅은 복합 명령을 분해해 검사하므로
     # `cd ws && ros2 launch ...` 처럼 앞에 다른 명령이 붙은 형태까지 잡는다.
@@ -164,6 +168,10 @@ ASK_RULES = [
     (re.compile(r"\bcansend\b"), "CAN 프레임 직접 송신 — 구동계에 명령이 갈 수 있습니다"),
     (re.compile(r"\bethercat\s+(download|reg_write|foe_write)\b"), "EtherCAT 슬레이브에 직접 쓰기"),
 ]
+ASK_RULES = ASK_RULES + HW_ASK_RULES
+
+HW_HINT = ("\n  다음 할 일: 직접 실행하지 말고 명령어와 '무엇이 움직이는지'(대상 장치·축·속도·정지 방법)를 "
+           "사용자에게 보여준 뒤 사용자가 실행하게 하세요. 시뮬이라면 시뮬임을 확인할 근거를 함께 적으세요.")
 
 
 # 파이프 자체가 위험 신호인 규칙은 분해 전 '명령 전체' 에 적용해야 한다.
@@ -281,6 +289,8 @@ def main():
 
     reason = (f"[dangerous-command-guard] 확인 필요: {why}\n"
               f"  문제 구간: {sub[:200]}")
+    if any(rx.search(sub) for rx, _ in HW_ASK_RULES):
+        reason += HW_HINT
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "ask",

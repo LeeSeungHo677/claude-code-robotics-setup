@@ -49,6 +49,8 @@ Duration: <total time>
 - Never execute destructive operations (delete, force push) without explicit confirmation.
 - If a critical task fails, stop and report rather than continuing blindly.
 - Keep each sub-task focused and independently verifiable.
+- End every sub-agent brief with a `Done when:` line — a check you can run (command + expected result), not a description. Before marking the task done, **re-run that check yourself**; a sub-agent's "done" is not evidence.
+- A reviewer sub-agent must not edit the artifact it judges — give it read-only tools, and send fixes back to the implementer.
 - Save progress after each completed task so work is not lost on failure.
 - Limit workflow to 10 tasks maximum; break larger workflows into phases.
 - Tier sub-agents by task: broad scans (file audits, pattern search, fan-out) → `Explore` or a light model; edits → `isolation: "worktree"`; a verify step (lint/test/cross-check) must pass before a worktree change reaches the main tree.

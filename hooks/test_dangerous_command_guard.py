@@ -127,7 +127,19 @@ def main():
         else:
             print(f"  FAIL  [{want:4}→{got}] {cmd}")
             fails += 1
-    total = len(CASES) + len(extra)
+    # 2026-11-10: 실기 명령의 확인 사유에는 '다음 할 일' 이 붙고, 일반 확인에는 안 붙는다
+    def reason_of(cmd):
+        r = subprocess.run([sys.executable, HOOK], capture_output=True, text=True, timeout=10,
+                           input=json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}))
+        return json.loads(r.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+    hint_cases = [("cd ws && ros2 launch bringup robot.launch.py", True),
+                  ("cansend can0 123#DEADBEEF", True),
+                  ("rm -r old_dir", False)]
+    for cmd, want in hint_cases:
+        got = "다음 할 일" in reason_of(cmd)
+        print(f"  {'PASS' if got == want else 'FAIL'}  [hint={want}] {cmd}")
+        fails += got != want
+    total = len(CASES) + len(extra) + len(hint_cases)
     print(f"\n{total - fails}/{total} 통과")
     sys.exit(1 if fails else 0)
 

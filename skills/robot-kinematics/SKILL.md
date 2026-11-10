@@ -128,3 +128,8 @@ while not converged:
   **순서가 다르다.** 여기서 나는 버그는 "가끔 이상하다" 로 나타나 추적이 어렵다.
 - 회전 표현 변환(RPY ↔ 쿼터니언 ↔ 행렬)은 한 유틸리티에 모아두고 그것만 쓴다.
 - SE3 보간은 선형 보간이 아니다. `pin.SE3.Interpolate` 또는 exp/log 를 쓴다.
+
+## 참고 교재 (무료)
+
+- [Modern Robotics](https://modernrobotics.northwestern.edu/nu-gm-book-resource/) (Lynch & Park) — 스크류 이론·PoE(지수곱) 기구학, 공식 코드 라이브러리 포함.
+  **함정**: 책의 PoE 공간/바디 자코비안 규약과 URDF·DH·Pinocchio 프레임 규약이 다르다 — 책 식을 옮길 때 어느 프레임 기준인지부터 맞춘다.

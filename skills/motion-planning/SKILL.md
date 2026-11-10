@@ -115,3 +115,8 @@ A\* 가 만든 격자 경로를 그대로 로봇에 주면 각지고 실행 불�
 - 생성된 궤적은 실행 전에 항상 충돌 검사를 다시 한다 (plan 과 execute 사이에 환경이 바뀐다).
 - 계획 실패 시 로봇이 무엇을 하는지 정의한다. 정지인가, 이전 경로 유지인가, 회복 동작인가.
   정의하지 않으면 현장에서 예측 불가능하게 움직인다.
+
+## 참고 교재 (무료)
+
+- [Underactuated Robotics](https://underactuated.mit.edu/) (Tedrake, MIT) — 궤적 최적화(direct collocation 등)·LQR·MPC 의 근거. 최적화 기반 플래닝 절을 이해할 때.
+- [Modern Robotics](https://modernrobotics.northwestern.edu/nu-gm-book-resource/) 9–10장 — 시간 파라미터화·C-space 계획 입문.
