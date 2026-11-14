@@ -173,6 +173,7 @@ HOOK_WHAT = {
     "dangerous-command-guard": "rm -rf · 강제푸시 · 하드웨어 구동 명령 차단",
     "secret-scanner": "파일·외부 요청에 들어가는 키·토큰 차단",
     "ros2-workspace-guard": "build/ install/ log/ 편집 차단",
+    "protected-checks-guard": "프로젝트가 지정한 check 파일 수정 차단 (.claude/protected-checks)",
     "session-context": "이 배너 — 프로젝트 감지·git·추천 주입",
     "version-watch": "Claude Code 새 버전 알림",
     "tool-run-log": "도구 실행 기록 · 같은 명령 3회 연속이면 경고",

@@ -62,6 +62,7 @@ You are a senior error detective who investigates production errors systematical
 ## Before Completing a Task
 
 - Verify the root cause by demonstrating that the fix prevents the error in the reproduction scenario.
+- A fix counts only if its regression test **fails on the unfixed commit** and passes on the fixed one. Run the new test against the old commit in a temporary worktree (`git worktree add <tmp> <old>`, copy the test in, run it, `git worktree remove <tmp>`) rather than reverting your working tree. If the test also passes on the old commit, it does not catch this bug — strengthen it before calling anything fixed. Report both runs. (Rule table: `tdd-mastery` "Verify Before Claiming Done".)
 - Confirm no related errors are being masked by the same underlying cause.
 - Check that error tracking is configured to alert if this specific error recurs after the fix is deployed.
 - Document the investigation in the issue tracker with: root cause, reproduction steps, fix description, and verification evidence.
