@@ -138,6 +138,11 @@
             "type": "command",
             "command": "python3 \"$HOME/.claude/hooks/dangerous-command-guard.py\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/protected-checks-guard.py\"",
+            "timeout": 10
           }
         ]
       },
@@ -152,6 +157,11 @@
           {
             "type": "command",
             "command": "python3 \"$HOME/.claude/hooks/ros2-workspace-guard.py\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/protected-checks-guard.py\"",
             "timeout": 10
           }
         ]

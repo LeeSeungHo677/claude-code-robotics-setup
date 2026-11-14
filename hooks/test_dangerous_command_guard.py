@@ -66,6 +66,37 @@ CASES = [
     (ASK,  'echo "<<EOF"\nsudo ls'),                                   # 종결자 없는 가짜 heredoc 으로 우회 못 함
     (ASK,  "cat <<<word\nsudo ls"),                                    # here-string 은 heredoc 이 아니다
 
+    # ── 2026-11-14 추가: 플래시·프린트 경로 보강 ──
+    (ASK,  "pyocd flash -t stm32f411re build/fw.hex"),
+    (ASK,  "probe-rs download --chip RP2040 fw.elf"),
+    (ASK,  "cargo flash --release --chip nRF52840_xxAA"),
+    (ASK,  "JLinkExe -CommandFile flash.jlink"),
+    (ASK,  "STM32_Programmer_CLI -c port=SWD -w fw.bin 0x08000000"),
+    (ASK,  "nrfjprog --program fw.hex --verify"),
+    (ASK,  "cd app && west flash"),
+    (ASK,  "idf.py -p /dev/ttyUSB0 flash monitor"),
+    (ASK,  "picotool load fw.uf2 -f"),
+    (ASK,  "espefuse.py --port /dev/ttyUSB0 burn_efuse JTAG_DISABLE"),
+    (ASK,  "idf.py efuse-burn --port /dev/ttyUSB0"),
+    (PASS, "espefuse.py --port /dev/ttyUSB0 summary"),
+    (ASK,  "pio run -t upload"),
+    (ASK,  "arduino-cli upload -p /dev/ttyACM0 --fqbn arduino:avr:uno sketch"),
+    (ASK,  "make -C firmware flash"),
+    (ASK,  "cp build/fw.uf2 /media/user/RPI-RP2/"),
+    (ASK,  'curl -X POST http://printer.local/printer/print/start?filename=part.gcode'),
+    (ASK,  'curl -X POST -H "Content-Type: application/json" http://octopi/api/job -d \'{"command":"start"}\''),
+    (ASK,  "echo G28 > /dev/ttyUSB0"),
+    (PASS, "pyocd list"),
+    (PASS, "probe-rs list"),
+    (PASS, "nrfjprog --ids"),
+    (PASS, "west build -b nrf52840dk_nrf52840 app"),
+    (PASS, "idf.py build"),
+    (PASS, "pio run"),
+    (PASS, "make host-test"),
+    (PASS, "make flash-test"),                                 # 이름에 flash 가 들어간 다른 타깃
+    (PASS, "curl -s http://printer.local/printer/info"),
+    (PASS, "cat /dev/ttyACM0"),
+
     # ── 통과해야 하는 것 (오탐 방지) ──
     (PASS, "ls -la"),
     (PASS, "git status --short"),

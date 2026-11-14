@@ -167,6 +167,31 @@ HW_ASK_RULES = [
     (re.compile(r"\b(stm32flash|dfu-util|avrdude|esptool(\.py)?|openocd|st-flash)\b"), "펌웨어 플래시"),
     (re.compile(r"\bcansend\b"), "CAN 프레임 직접 송신 — 구동계에 명령이 갈 수 있습니다"),
     (re.compile(r"\bethercat\s+(download|reg_write|foe_write)\b"), "EtherCAT 슬레이브에 직접 쓰기"),
+
+    # 2026-11-14 추가: 위 목록에 없던 프로브·빌드 시스템의 플래시 경로 (펌웨어 test ladder 를 세팅하다 확인한 빈칸).
+    # 조회·빌드(`pyocd list`, `probe-rs list`, `west build`, `idf.py build`, `pio run`)는 통과시킨다.
+    (re.compile(r"\bpyocd\s+(flash|load|erase|commander|cmd)\b"), "펌웨어 플래시(pyOCD)"),
+    (re.compile(r"\bprobe-rs\s+(download|run|erase|attach|reset)\b|\bcargo\s+(flash|embed)\b"),
+     "펌웨어 플래시(probe-rs)"),
+    (re.compile(r"\b(JLinkExe|JLink\.exe|JFlashExe|JFlash|STM32_Programmer_CLI|bossac|teensy_loader_cli|mspdebug)\b"),
+     "펌웨어 플래시(전용 프로그래머)"),
+    (re.compile(r"\bnrfjprog\b.*(--program|--erase|--recover|--reset|--memwr|(\s|^)-e(\s|$))"
+                r"|\bnrfutil\b.*\b(program|dfu|recover|erase|reset)\b"), "펌웨어 플래시(Nordic)"),
+    (re.compile(r"\bwest\s+flash\b|\bidf\.py\b.*(?<![\w-])(flash|erase[-_]flash|erase_otadata)(?![\w-])"),
+     "펌웨어 플래시(Zephyr/ESP-IDF)"),
+    (re.compile(r"\bpicotool\s+(load|reboot|erase)\b"), "펌웨어 플래시(RP2040)"),
+    (re.compile(r"\bespefuse(\.py)?\b.*\b(burn\w*|write_protect_efuse|read_protect_efuse)\b"
+                r"|\bidf\.py\b.*\befuse[-_](burn|write)\w*"),
+     "eFuse 굽기 — 칩에 영구 기록되어 되돌릴 수 없습니다 (보안 부트·키·핀 설정)"),
+    (re.compile(r"\b(pio|platformio)\s+run\b.*(-t|--target)\s*(upload|uploadfs|program)\b"
+                r"|\barduino-cli\s+upload\b"), "펌웨어 업로드(PlatformIO/Arduino)"),
+    (re.compile(r"\bmake\b.*(?<![\w-])(flash|upload|program|burn)(?![\w-])"), "make 플래시 타깃"),
+    (re.compile(r"\.uf2\b.*\s/(media|mnt|run/media)/"), "UF2 를 보드 드라이브에 복사(=플래시)"),
+
+    # 3D 프린터·CNC: 출력 시작 = 노즐·베드 가열과 축 구동
+    (re.compile(r"/printer/print/(start|resume)\b|/printer/gcode/script\b"), "프린트 시작/G-code 실행(Moonraker)"),
+    (re.compile(r"/api/(job|files/\S+)\b.*\b(start|print|select)\b"), "프린트 시작(OctoPrint)"),
+    (re.compile(r">\s*/dev/tty(USB|ACM)\d"), "직렬 장치에 직접 쓰기 — 프린터·CNC·보드가 명령을 실행합니다"),
 ]
 ASK_RULES = ASK_RULES + HW_ASK_RULES
 
