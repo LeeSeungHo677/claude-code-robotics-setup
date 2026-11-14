@@ -36,12 +36,13 @@ def make_project(tmp):
     proj = os.path.join(tmp, "proj")
     for d in ("tests", "sim/grader", "src", ".claude", "electronics"):
         os.makedirs(os.path.join(proj, d))
-    files = ["tests/test_budget.py", "tests/conftest.py", "sim/grader/test_grader.py",
+    files = [".claude/settings.json", "src/check.sh", "tests/test_budget.py", "tests/conftest.py", "sim/grader/test_grader.py",
              "src/app.py", "check.sh", "electronics/board.kicad_dru", "electronics/board.kicad_sch"]
     for f in files:
         open(os.path.join(proj, f), "w").close()
     with open(os.path.join(proj, ".claude/protected-checks"), "w") as f:
-        f.write("# 판정 기준\ntests/test_*.py\ntests/conftest.py\nsim/grader/\ncheck.sh\n*.kicad_dru\n")
+        f.write("# 판정 기준\ntests/test_*.py\ntests/conftest.py\nsim/grader/\n./check.sh\n*.kicad_dru\n"
+                ".claude/settings.json\n")
     other = os.path.join(tmp, "other")                  # 목록 파일이 없는 프로젝트
     os.makedirs(os.path.join(other, "tests"))
     open(os.path.join(other, "tests/test_x.py"), "w").close()
@@ -59,6 +60,8 @@ def main():
         (DENY, edit(".claude/protected-checks", proj)),                    # 목록 자체
         (DENY, edit("tests/../tests/test_budget.py", proj)),                # 경로 정규화
         (PASS, edit("tests/test_new_stage.py", proj, "Write")),             # 새 check 는 허용
+        (DENY, edit(".claude/settings.json", proj)),                       # 점으로 시작하는 패턴
+        (PASS, edit("src/check.sh", proj)),                                # ./check.sh 는 루트만
         (PASS, edit("src/app.py", proj)),
         (PASS, edit("electronics/board.kicad_sch", proj)),
         (PASS, edit("tests/test_x.py", other)),                             # opt-in 안 한 프로젝트

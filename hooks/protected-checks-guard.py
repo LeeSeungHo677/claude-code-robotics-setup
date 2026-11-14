@@ -80,7 +80,7 @@ def matches(rel, globs):
             if rel.startswith(g) or fnmatch.fnmatch(rel, g + "*"):
                 return True
         elif "/" in g:
-            if fnmatch.fnmatch(rel, g.lstrip("./")):
+            if fnmatch.fnmatch(rel, g[2:] if g.startswith("./") else g):
                 return True
         elif fnmatch.fnmatch(name, g):
             return True
