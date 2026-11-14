@@ -180,6 +180,9 @@ HW_ASK_RULES = [
     (re.compile(r"\bwest\s+flash\b|\bidf\.py\b.*(?<![\w-])(flash|erase[-_]flash|erase_otadata)(?![\w-])"),
      "펌웨어 플래시(Zephyr/ESP-IDF)"),
     (re.compile(r"\bpicotool\s+(load|reboot|erase)\b"), "펌웨어 플래시(RP2040)"),
+    (re.compile(r"\bespefuse(\.py)?\b.*\b(burn\w*|write_protect_efuse|read_protect_efuse)\b"
+                r"|\bidf\.py\b.*\befuse[-_](burn|write)\w*"),
+     "eFuse 굽기 — 칩에 영구 기록되어 되돌릴 수 없습니다 (보안 부트·키·핀 설정)"),
     (re.compile(r"\b(pio|platformio)\s+run\b.*(-t|--target)\s*(upload|uploadfs|program)\b"
                 r"|\barduino-cli\s+upload\b"), "펌웨어 업로드(PlatformIO/Arduino)"),
     (re.compile(r"\bmake\b.*(?<![\w-])(flash|upload|program|burn)(?![\w-])"), "make 플래시 타깃"),
