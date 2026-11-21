@@ -214,6 +214,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/lint-on-edit.py\"",
+            "timeout": 10
+          }
+        ]
       }
     ]
   },

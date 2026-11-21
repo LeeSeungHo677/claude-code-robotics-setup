@@ -4,7 +4,7 @@
 
 <h3>로봇(ROS 2) 개발자를 위한 Claude Code <code>~/.claude</code> 세팅</h3>
 
-스킬 89 · 에이전트 14 · 커맨드 48 · 훅 8 (훅 테스트 150종 이상)
+스킬 89 · 에이전트 14 · 커맨드 48 · 훅 9 (훅 테스트 150종 이상)
 
 <p>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/LeeSeungHo677/claude-code-robotics-setup?style=flat-square&color=58a6ff" alt="license"></a>
@@ -17,7 +17,7 @@
 </p>
 
 <sub>English: A Claude Code configuration for robotics/ROS 2 development — 89 skills, 14 agents,
-48 commands, and 8 tested hooks. Documentation is in Korean; skill trigger descriptions are
+48 commands, and 9 tested hooks. Documentation is in Korean; skill trigger descriptions are
 bilingual, so skill routing works with English prompts too.</sub>
 
 </div>
@@ -54,7 +54,7 @@ cd claude-code-robotics-setup
 | **skills/** 89 | ROS 2·Nav2·SLAM·매니퓰레이션·인지/학습·시뮬·안전·플릿 운영 + 웹/백엔드/인프라 | 필요할 때만 (개수가 늘어도 비용 없음) |
 | **agents/** 14 | `ros2-reviewer` `robot-safety-reviewer` `robotics-architect` 등 | 이름을 불러야 옴 |
 | **commands/** 48 | `/robot:diagnose` `/robot:preflight` `/ros2:new-node` `/setup:tree` … | 슬래시로 호출 |
-| **hooks/** 8 | 위험 명령 차단, 시크릿 차단(파일·외부 요청), colcon 생성물 편집 차단, 프로젝트 check 파일 수정 차단, 세션 시작 배너·인수인계, 버전 감시, 도구 실행 기록, 외부 콘텐츠 지시문 표시 | 매 도구 호출 |
+| **hooks/** 9 | 위험 명령 차단, 시크릿 차단(파일·외부 요청), colcon 생성물 편집 차단, 프로젝트 check 파일 수정 차단, 세션 시작 배너·인수인계, 버전 감시, 도구 실행 기록, 외부 콘텐츠 지시문 표시, 편집한 `.py` 린트 결과 첨부(opt-in) | 매 도구 호출 |
 | **eval-harness/** | 스킬 라우팅·안전 회귀 평가 케이스 (`claude plugin eval`, README 참고) | 직접 실행할 때만 |
 | **bin/** | `setup-tree.py` — 세팅 전체를 tree 도식으로 (터미널에서 직접 실행) | 부를 때만 |
 | **CLAUDE.md** | 항상 지켜야 하는 규칙 (반론 제기, 실기/시뮬 구분, 계층별 진단 순서 …) | 매 세션 |
@@ -108,7 +108,7 @@ claude-code-robotics-setup/
 │   ├── dangerous-command-guard.py   ros2-workspace-guard.py   secret-scanner.py
 │   ├── session-context.py           version-watch.py
 │   ├── tool-run-log.py              untrusted-content-flag.py
-│   ├── protected-checks-guard.py
+│   ├── protected-checks-guard.py    lint-on-edit.py
 │   └── hooklib.py · test_*.py
 ├── bin/setup-tree.py          세팅 전체를 tree 로 보여준다
 ├── eval-harness/              스킬 라우팅·안전 회귀 평가
@@ -192,7 +192,10 @@ CLAUDE_DIR=/tmp/try ./install.sh   # 다른 위치에 시험 설치
                   "command": "python3 \"$HOME/.claude/hooks/tool-run-log.py\"", "timeout": 5 }] },
     { "matcher": "WebFetch|WebSearch|Bash|mcp__.*",
       "hooks": [{ "type": "command",
-                  "command": "python3 \"$HOME/.claude/hooks/untrusted-content-flag.py\"", "timeout": 5 }] }
+                  "command": "python3 \"$HOME/.claude/hooks/untrusted-content-flag.py\"", "timeout": 5 }] },
+    { "matcher": "Write|Edit|MultiEdit",
+      "hooks": [{ "type": "command",
+                  "command": "python3 \"$HOME/.claude/hooks/lint-on-edit.py\"", "timeout": 10 }] }
   ],
   "SessionStart": [
     { "matcher": "",
@@ -304,6 +307,7 @@ Claude 안에서는 `/setup:tree` 로도 같은 것이 나오지만, **그냥 �
 | `version-watch` | (차단 없음 — Claude Code 버전이 올랐을 때만 알림) | — |
 | `tool-run-log` | (차단 없음 — 도구 실행을 `~/.claude/logs/` 에 기록, 같은 명령 3회 연속이면 경고) | — |
 | `untrusted-content-flag` | (차단 없음 — 외부에서 가져온 내용에 지시문이 섞이면 경고 표시) | — |
+| `lint-on-edit` | (차단 없음 — 편집한 `.py` 에 `ruff check --no-fix` 결과를 붙인다. 프로젝트 루트에 `.claude/lint-on-edit` 파일을 만든 프로젝트만, ruff 가 없으면 건너뜀) | — |
 
 **복합 명령도 분해해서 검사한다.** `cd ws && source install/setup.bash && ros2 launch ...`
 처럼 앞에 안전한 명령을 붙여도 실기 구동은 잡힌다.
