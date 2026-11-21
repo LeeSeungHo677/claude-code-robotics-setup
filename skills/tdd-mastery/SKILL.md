@@ -137,6 +137,26 @@ go tool cover -func=cover.out
 - Assert on behavior, not on mock call counts
 - Use `t.Cleanup` / `afterEach` to reset shared mocks
 
+## Judging a Good Test
+
+Before writing the test body, answer: **which production change should make this test fail — and is that change a bug or a decision?** If you cannot name one, the test has no job.
+
+- **Hand-written literal expectations.** Derive `want` by hand (literal or hand-checked fixture). An expected value computed by the code under test or its helpers is a *mirror assertion* — it passes whatever the code does.
+  ```python
+  # ❌ mirror: both sides come from the same builder
+  assert build_query(tag="urgent") == build_query(tag="urgent")
+  # ✅ literal
+  assert build_query(tag="urgent") == 'tag:"urgent"'
+  ```
+- **No change detectors.** A test that only fails on intentional decisions (a constant's value, exact message wording, private structure) fires on redesign and sleeps through bugs. Not `assert MAX_RETRIES == 5` but "a failing call is retried 5 times and the 6th never happens".
+- **Run it, don't grep it.** Asserting that a script, config, or skill file *contains* a line proves only that the source is the source. Execute it against controlled input and assert output, side effects, or exit code.
+- **Your boundary, not the framework.** Test the route you register, the query you emit, the payload you produce — not that the router calls a registered handler.
+- **Mental mutation check** before finishing: for each realistic mutation — wrong constant/argument, wrong branch, missing side effect, empty/default return, missing validation for zero/empty/None/unauthorized/malformed — at least one test must fail. A mutation nothing catches means the behavior is unprotected or the test is tautological.
+
+When a bug came from invalid data, a test plus one check at the entry point is not enough: validate at each layer the data passes (entry → business logic → **environment guard**, e.g. refuse `git init`/`rm` outside a temp dir while running under test → debug log before the dangerous call) so the bug becomes structurally impossible.
+
+<!-- 출처: obra/superpowers v7.0.2 (MIT) test-driven-development/writing-good-tests.md, systematic-debugging/defense-in-depth.md 요약, 2026-11-21 -->
+
 ## Anti-Patterns to Avoid
 
 - Testing implementation details instead of behavior
@@ -158,8 +178,11 @@ Run the command that proves the claim in this turn and read its output. A previo
 | Regression test works | Revert the fix → test fails → restore → passes | Test passes once |
 | Subagent finished | `git diff` shows the change, you ran its tests | Agent says "success" |
 | Requirements met | Each requirement checked one by one | Tests pass |
+| Change is done | **Full** suite run on the final tree, output pristine (no new warnings/errors) | Only the tests you touched |
+
+Report every failure the full run shows — including ones you did not cause. "Pre-existing, not mine" goes in the report with the output; it is not a reason to omit it.
 
 Words like "should", "probably", "seems to" in a completion report mean verification was skipped.
 
-<!-- 출처: obra/superpowers verification-before-completion (MIT), 2026-10-25 요약 반영 -->
+<!-- 출처: obra/superpowers verification-before-completion (MIT), 2026-10-25 요약 반영. 전체 suite·내 탓 아닌 실패 보고·경고 없음 행은 v7.0.2 test-driven-development 「Verify GREEN」, 2026-11-21 -->
 

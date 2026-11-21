@@ -222,6 +222,24 @@ CLAUDE_DIR=/tmp/try ./install.sh   # 다른 위치에 시험 설치
 | [genjutsu](https://github.com/AThevon/genjutsu) (MIT) | 웹 UI 디자인 스킬 (`cast`·`paint`, ui-ux-pro-max 포함) | 4.1 `bunshin` 은 실행당 토큰 수백만 — 실행 전 비용 확인 게이트 있음 |
 | [text-to-cad](https://github.com/earthtojake/text-to-cad) (MIT) | CAD·URDF·도면 스킬 + MCP `cad` (`uvx cadgen`) | 사용 통계 기본 전송 → `env.CADGEN_TELEMETRY=0` 으로 끔. `urdf`·`sdf` 스킬이 로봇 스킬과 라우팅이 겹칠 수 있다 |
 
+**선택 설치 — 디자인·브라우저 외부 스킬 (이 레포에 들어 있지 않다)** — `design-system` 스킬의
+「어느 스킬을 따를 것인가」 절 수동 스킬 표가 이 이름들을 가리킨다. 각자 원 레포의 버전·라이선스를 확인하고
+`~/.claude/skills/<이름>/` 에 직접 넣는다. **전부 수동 호출 전용으로 둘 것을 권한다** — SKILL.md 프론트매터에
+`disable-model-invocation: true` 한 줄. 자동 발동 디자인 스킬은 `design-system`·`ui-ux-design`·`frontend-design`
+셋이면 충분하고, 더 늘리면 서로 요청을 가로챈다(대시보드 요청에 랜딩용 스킬이 열리는 식).
+
+| 이름 | 출처 | 라이선스 | 주의 |
+|---|---|---|---|
+| `web-design-guidelines` | [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) (규칙 원문 [web-interface-guidelines](https://github.com/vercel-labs/web-interface-guidelines)) | MIT | 운영 콘솔용 발췌는 `design-system/references/web-interface-checklist.md` 에 포함 |
+| Emil 스킬 (`remove-animations` `review-animations` `animate` `break-ui` 등 20개) | [emilkowalski/skills](https://github.com/emilkowalski/skills) | MIT | 마크다운뿐. `design-system` §7 「빼는 기준」에 요약 |
+| `hallmark` | [Nutlope/hallmark](https://github.com/Nutlope/hallmark) | MIT | `install-hook.mjs`·`install.mjs` 는 settings.json 에 훅을 등록한다 — 실행하지 않는다. 이미지 생성 스크립트는 API 키가 있으면 외부로 보낸다. Node·Chrome 필요 |
+| `design-taste-frontend` (taste-skill) | [Leonxlnx/taste-skill](https://github.com/Leonxlnx/taste-skill) | MIT | **프론트매터의 `hooks: Stop:` 블록은 지우고 넣는다** — 턴이 끝날 때마다 검사 스크립트가 돈다(timeout 600). 레포의 `install.sh` 는 심볼릭 링크라 버전 고정이 안 된다 |
+| `ui-ux-pro-max` | [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) | MIT | 스크립트는 Python 표준 라이브러리만, 네트워크 없음 |
+| `image-to-code` | [Leonxlnx/imagegen-skills](https://github.com/Leonxlnx/imagegen-skills) | MIT | 이미지 생성 도구 전제. 외부 생성 서비스로 시안을 보내기 전에 확인. 운영 화면용 아님 |
+| `agent-browser` | [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser) | Apache-2.0 | npm CLI 필요. `agent-browser install` 은 Chrome for Testing 을 따로 받는다 — 시스템 Chrome 이 있으면 생략 가능 |
+| `webapp-testing` | [anthropics/skills](https://github.com/anthropics/skills/tree/main/skills/webapp-testing) | Apache-2.0 | Anthropic 공식. 자동 발동으로 둬도 된다. Playwright 버전을 설치된 브라우저 빌드에 맞춰 고정 |
+| Impeccable (플러그인) | [pbakaus/impeccable](https://github.com/pbakaus/impeccable) | Apache-2.0 | 엔진이 디자인 선택 결과를 외부로 보낸다 → `settings.json` `env` 에 `IMPECCABLE_NO_TELEMETRY=1`·`IMPECCABLE_NO_UPDATE_CHECK=1`. 플러그인 훅(모든 편집에 엔진 실행)을 끄려면 `IMPECCABLE_HOOK_DISABLED=1`. 텔레메트리를 꺼도 roll 기능은 쓰는 순간 서버에 요청한다. 플러그인 스킬 SKILL.md 에 `disable-model-invocation: true` (업데이트마다 다시) |
+
 ### 요구사항
 
 - Claude Code
