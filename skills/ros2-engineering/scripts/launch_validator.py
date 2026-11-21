@@ -2,6 +2,9 @@
 """Static analysis for ROS 2 Python launch files (*.launch.py, *_launch.py).
 
 XML (.launch.xml) and YAML (.launch.yaml) launch files are not supported.
+Check XML markup with xmllint or ament_xmllint (well-formedness only), load
+and parse any format with `ros2 launch <pkg> <file> --show-args` or
+`--print` (structural only), and add this static validator for Python.
 
 Usage:
     python launch_validator.py path/to/launch_dir/
@@ -20,6 +23,7 @@ Checks performed:
 
 import argparse
 import ast
+import importlib.util
 import os
 import re
 import sys
@@ -73,7 +77,9 @@ class LaunchFileVisitor(ast.NodeVisitor):
         self.issues: list[Issue] = []
         # (name, namespace, line, condition fingerprints)
         self.node_names: list[tuple[str, str, int, tuple]] = []
-        self.has_generate_func = False
+        # Enclosing function definitions, so `return` statements can be
+        # attributed to the function they leave.
+        self._function_stack: list[str] = []
         # Namespaces pushed by PushRosNamespace actions in enclosing action
         # lists (tracked at the list literal, so lists assigned to variables
         # and passed as GroupAction(actions=var) are scoped too). None means
@@ -93,9 +99,38 @@ class LaunchFileVisitor(ast.NodeVisitor):
         self.issues.append(Issue(self.filepath, lineno, severity, message))
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        if node.name == "generate_launch_description":
-            self.has_generate_func = True
+        self._function_stack.append(f"{node.name}@{node.lineno}")
         self.generic_visit(node)
+        self._function_stack.pop()
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._function_stack.append(f"{node.name}@{node.lineno}")
+        self.generic_visit(node)
+        self._function_stack.pop()
+
+    def _visit_flow(self, marker: tuple, statements: list) -> None:
+        # Python control flow scopes like a launch condition: actions built
+        # in the two branches of one `if`, or returned by two different
+        # `return` statements of one function (an OpaqueFunction returns
+        # once), are never launched together, so a shared name there is not
+        # a provable collision.
+        self._condition_stack.append(marker)
+        for statement in statements:
+            self.visit(statement)
+        self._condition_stack.pop()
+
+    def visit_If(self, node: ast.If) -> None:
+        self.visit(node.test)
+        where = f"{node.lineno}:{node.col_offset}"
+        self._visit_flow(("flow", f"if-body@{where}"), node.body)
+        self._visit_flow(("flow", f"if-else@{where}"), node.orelse)
+
+    def visit_Return(self, node: ast.Return) -> None:
+        if node.value is None:
+            return
+        owner = self._function_stack[-1] if self._function_stack else "module"
+        marker = ("flow", f"return@{owner}@{node.lineno}:{node.col_offset}")
+        self._visit_flow(marker, [node.value])
 
     def visit_Call(self, node: ast.Call) -> None:
         func_name = self._get_call_name(node)
@@ -215,6 +250,12 @@ class LaunchFileVisitor(ast.NodeVisitor):
         ns_node = self._get_keyword_value(node, "namespace")
         output_node = self._get_keyword_value(node, "output")
 
+        # PushRosNamespace affects execution context; it does not supply this
+        # constructor's required keyword. **kwargs prevents a static conclusion.
+        if (func_name == "LifecycleNode" and ns_node is None
+                and not any(kw.arg is None for kw in node.keywords)):
+            self._add(node, "error", "LifecycleNode() missing required 'namespace' argument")
+
         if pkg_node is None:
             self._add(node, "error", f"{func_name}() missing required 'package' argument")
 
@@ -243,9 +284,14 @@ class LaunchFileVisitor(ast.NodeVisitor):
         # etc.), either on the node itself or pushed by an enclosing group.
         deprecated_name_node = self._get_keyword_value(node, "node_name")
         effective_name_node = name_node or deprecated_name_node
+        # Resolve both legacy aliases together when reviewing a migration.
+        # Treating node_name as a name but dropping node_namespace invents
+        # root-namespace collisions. Constructor compatibility is checked above.
+        effective_ns_node = ns_node if ns_node is not None else self._get_keyword_value(
+            node, "node_namespace")
         name_str = self._get_string_value(effective_name_node) if effective_name_node else None
-        ns_str = self._get_string_value(ns_node) if ns_node else ""
-        ns_is_dynamic = ns_node is not None and ns_str is None
+        ns_str = self._get_string_value(effective_ns_node) if effective_ns_node else ""
+        ns_is_dynamic = effective_ns_node is not None and ns_str is None
         effective_ns = self._effective_namespace(ns_str or "")
         conds = tuple(self._condition_stack)
         own_cond = self._get_keyword_value(node, "condition")
@@ -484,36 +530,73 @@ class LaunchFileVisitor(ast.NodeVisitor):
         return any((opposite[kind], expr) in b
                    for kind, expr in a if kind in opposite)
 
+    @staticmethod
+    def _flows_mutually_exclusive(a: tuple, b: tuple) -> bool:
+        """Different branches of one `if`, or different `return` statements
+        of one function: at most one side runs per evaluation."""
+        for kind_a, flow_a in a:
+            if kind_a != "flow":
+                continue
+            for kind_b, flow_b in b:
+                if kind_b != "flow" or flow_a == flow_b:
+                    continue
+                head_a, _, tail_a = flow_a.partition("@")
+                head_b, _, tail_b = flow_b.partition("@")
+                if head_a.startswith("if-") and head_b.startswith("if-") and tail_a == tail_b:
+                    return True
+                if (head_a == "return" and head_b == "return"
+                        and tail_a.rsplit("@", 1)[0] == tail_b.rsplit("@", 1)[0]):
+                    return True
+        return False
+
     def check_duplicates(self) -> None:
         """Check for duplicate node names in the same effective namespace.
 
         Severity depends on what can be proven statically:
         - both unconditional, or both guarded by structurally identical
-          conditions -> error (they always coexist when launched)
+          conditions and the same control flow -> error (they always
+          coexist when launched)
         - If/Unless pair over the same expression -> provably exclusive,
           no issue
+        - in different branches of one `if` or in different `return`
+          statements of one function -> warning: only one side is built
+          per evaluation, but the file does not prove which
         - otherwise (differing or unknown conditions) -> warning: they
           collide only if the conditions are true simultaneously
+
+        Every earlier definition is compared, not only the first: a pair
+        inside one return list collides even when an earlier definition
+        sits in another branch.
         """
-        seen: dict[str, tuple[int, tuple]] = {}
+        seen: dict[str, list[tuple[int, tuple]]] = {}
         for name, ns, line, conds in self.node_names:
             key = f"{ns}/{name}"
-            if key not in seen:
-                seen[key] = (line, conds)
+            earlier = seen.setdefault(key, [])
+            earlier.append((line, conds))
+            if len(earlier) == 1 or _line_has_suppression(self.source, line):
                 continue
-            first_line, first_conds = seen[key]
-            if _line_has_suppression(self.source, line):
+            candidates = [(first_line, first_conds)
+                          for first_line, first_conds in earlier[:-1]
+                          if not self._conditions_mutually_exclusive(first_conds, conds)]
+            if not candidates:
                 continue
-            if self._conditions_mutually_exclusive(first_conds, conds):
-                continue
-            if first_conds == conds:
+            same = [first_line for first_line, first_conds in candidates
+                    if first_conds == conds]
+            if same:
+                first_line = same[0]
                 severity = "error"
                 extra = (" (both guarded by the same condition)"
-                         if conds else "")
+                         if any(kind != "flow" for kind, _ in conds) else "")
             else:
+                first_line = candidates[0][0]
                 severity = "warning"
-                extra = (" (conditional; collides if the conditions are "
-                         "true simultaneously)")
+                if all(self._flows_mutually_exclusive(first_conds, conds)
+                       for _, first_conds in candidates):
+                    extra = (" (in different branches or return statements; "
+                             "only one of them is built per evaluation)")
+                else:
+                    extra = (" (conditional; collides if the conditions are "
+                             "true simultaneously)")
             self.issues.append(Issue(
                 self.filepath, line, severity,
                 f"Duplicate node name '{name}' in namespace '{ns}' "
@@ -561,14 +644,158 @@ def check_raw_patterns(filepath: str, source: str) -> list[Issue]:
     return issues
 
 
+# What a module-scope name is bound to once the module has run. The launch
+# loader imports the file and calls the attribute afterwards, so the final
+# binding decides. These states and the rules below mirror
+# skill_stop_hook._module_symbols; a test keeps the two verdicts identical.
+_MISSING = "missing"
+_SYNC = "sync"                  # callable and not a coroutine function
+_ASYNC = "async"                # calling it returns a coroutine
+_NON_CALLABLE = "non_callable"  # None, a literal, a container or a module
+_UNKNOWN = "unknown"            # bound only on some execution paths
+
+
+def _is_falsy_literal(test: ast.AST) -> bool:
+    return isinstance(test, ast.Constant) and not test.value
+
+
+def _is_truthy_literal(test: ast.AST) -> bool:
+    return isinstance(test, ast.Constant) and bool(test.value)
+
+
+def _loop_never_runs(node: ast.AST) -> bool:
+    """`for _ in []:` / `while False:` — a body that provably cannot run."""
+    if isinstance(node, ast.While):
+        return _is_falsy_literal(node.test)
+    assert isinstance(node, ast.For)
+    it = node.iter
+    if isinstance(it, (ast.List, ast.Tuple, ast.Set)):
+        return not it.elts
+    if isinstance(it, ast.Dict):
+        return not it.keys
+    return isinstance(it, ast.Constant) and it.value in ("", b"")
+
+
+def _classify_value(value: ast.AST, symbols: dict) -> str:
+    """State that assigning *value* leaves the target in."""
+    if isinstance(value, ast.Lambda):
+        return _SYNC
+    if isinstance(value, (ast.Constant, ast.Dict, ast.List, ast.Tuple,
+                          ast.Set, ast.JoinedStr)):
+        return _NON_CALLABLE
+    if isinstance(value, ast.Name):
+        # An alias is only as good as its target; a name this module never
+        # bound (a star-import) is assumed to be the callable it was meant to be.
+        return symbols.get(value.id, _SYNC)
+    if isinstance(value, (ast.Attribute, ast.Call, ast.Subscript)):
+        return _SYNC  # cannot resolve statically; assume a callable
+    return _UNKNOWN
+
+
+def _merge_symbols(variants: list) -> dict:
+    """Combine per-path symbol tables; disagreement means unknown."""
+    merged: dict = {}
+    for name in set().union(*(set(v) for v in variants)):
+        states = {v.get(name, _MISSING) for v in variants}
+        merged[name] = states.pop() if len(states) == 1 else _UNKNOWN
+    return merged
+
+
+def _module_symbols(body: list, symbols: Optional[dict] = None) -> dict:
+    """Map every module-scope name to what it is bound to after *body*.
+
+    Later bindings overwrite earlier ones, as the interpreter does. A def
+    nested in a function or class binds nothing at module scope; a re-export
+    (`from pkg.common import generate_launch_description`) or an alias does.
+    `if`, `try` and loops bind only on some execution paths: a loop may run
+    zero times and its `else` is skipped after `break`, while a loop over an
+    empty literal provably never runs its body.
+    """
+    symbols = {} if symbols is None else symbols
+    for node in body:
+        if isinstance(node, ast.FunctionDef):
+            symbols[node.name] = _SYNC
+        elif isinstance(node, ast.AsyncFunctionDef):
+            symbols[node.name] = _ASYNC
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                symbols[alias.asname or alias.name] = _SYNC
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                # `import pkg as name` binds a module, which is not callable.
+                symbols[alias.asname or alias.name.split(".")[0]] = _NON_CALLABLE
+        elif isinstance(node, ast.Assign):
+            state = _classify_value(node.value, symbols)
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    symbols[target.id] = state
+        elif isinstance(node, ast.AnnAssign):
+            if node.value is not None and isinstance(node.target, ast.Name):
+                symbols[node.target.id] = _classify_value(node.value, symbols)
+        elif isinstance(node, ast.Delete):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    symbols.pop(target.id, None)
+        elif isinstance(node, ast.If):
+            if _is_falsy_literal(node.test):
+                _module_symbols(node.orelse, symbols)
+            elif _is_truthy_literal(node.test):
+                _module_symbols(node.body, symbols)
+            else:
+                variants = [_module_symbols(node.body, dict(symbols)),
+                            _module_symbols(node.orelse, dict(symbols))]
+                symbols.clear()
+                symbols.update(_merge_symbols(variants))
+        elif isinstance(node, ast.Try):
+            variants = [_module_symbols(node.body + node.orelse, dict(symbols))]
+            variants.extend(_module_symbols(handler.body, dict(symbols))
+                            for handler in node.handlers)
+            symbols.clear()
+            symbols.update(_merge_symbols(variants))
+            _module_symbols(node.finalbody, symbols)
+        elif isinstance(node, ast.With):
+            _module_symbols(node.body, symbols)
+        elif isinstance(node, (ast.For, ast.While)):
+            if _loop_never_runs(node):
+                _module_symbols(node.orelse, symbols)
+            else:
+                variants = [_module_symbols(node.orelse, dict(symbols)),              # zero iterations
+                            _module_symbols(node.body + node.orelse, dict(symbols)),  # ran, no break
+                            _module_symbols(node.body, dict(symbols))]                # ran, break
+                symbols.clear()
+                symbols.update(_merge_symbols(variants))
+    return symbols
+
+
+_LAUNCH_PACKAGES = frozenset(("launch", "launch_ros", "launch_testing",
+                              "launch_xml", "launch_yaml"))
+
+
+def _imports_launch(tree: ast.AST) -> bool:
+    """True when the module imports a launch package anywhere, functions included."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(alias.name.split(".")[0] in _LAUNCH_PACKAGES for alias in node.names):
+                return True
+        elif (isinstance(node, ast.ImportFrom) and not node.level and node.module
+              and node.module.split(".")[0] in _LAUNCH_PACKAGES):
+            return True
+    return False
+
+
 def validate_file(filepath: str) -> list[Issue]:
     """Validate a single launch file."""
     issues = []
 
     try:
-        source = Path(filepath).read_text()
+        # Decode as Python's import does (UTF-8 or a PEP 263 coding line),
+        # not with the locale encoding: a cp949/cp1252 host misreads the
+        # UTF-8 that every ROS 2 package ships.
+        source = importlib.util.decode_source(Path(filepath).read_bytes())
     except (OSError, UnicodeDecodeError) as e:
         return [Issue(filepath, 0, "error", f"Cannot read file: {e}")]
+    except SyntaxError as e:
+        return [Issue(filepath, e.lineno or 0, "error", f"Syntax error: {e.msg}")]
 
     # Parse AST
     try:
@@ -581,11 +808,32 @@ def validate_file(filepath: str) -> list[Issue]:
     visitor.visit(tree)
     visitor.check_duplicates()
 
-    if not visitor.has_generate_func:
+    symbols = _module_symbols(tree.body)
+    entry = symbols.get("generate_launch_description", _MISSING)
+    if entry == _MISSING:
+        # launch_testing modules export generate_test_description instead.
+        if symbols.get("generate_test_description", _MISSING) == _MISSING:
+            issues.append(Issue(
+                filepath, 0, "error",
+                "Missing generate_launch_description() function. "
+                "Every ROS 2 launch file must define this function."))
+    elif entry == _ASYNC:
         issues.append(Issue(
             filepath, 0, "error",
-            "Missing generate_launch_description() function. "
-            "Every ROS 2 launch file must define this function."))
+            "generate_launch_description resolves to a coroutine function; the "
+            "launch loader calls it directly and gets a coroutine, not a "
+            "LaunchDescription."))
+    elif entry == _NON_CALLABLE:
+        issues.append(Issue(
+            filepath, 0, "error",
+            "generate_launch_description is bound to something that is not "
+            "callable (None, a literal, a container or a module); the launch "
+            "loader calls whatever the module exports under that name."))
+    elif entry == _UNKNOWN:
+        issues.append(Issue(
+            filepath, 0, "warning",
+            "generate_launch_description() is bound only on some execution "
+            "paths; the launch loader fails on any path that leaves it unset."))
 
     issues.extend(visitor.issues)
 
@@ -602,15 +850,60 @@ def validate_file(filepath: str) -> list[Issue]:
     return issues
 
 
+# colcon output and tool caches hold copies of the sources (install/ share
+# trees, build/ ament_python copies); scanning them repeats every finding.
+_SKIP_DIRS = frozenset(("build", "install", "log", "__pycache__", "node_modules"))
+# Raw-text fallback, only for files the parser rejects.
+_LAUNCH_SOURCE_HINT = re.compile(
+    r"^\s*(?:from|import)\s+launch(?:_ros|_testing|_xml|_yaml)?\b"
+    r"|generate_launch_description", re.MULTILINE)
+
+
+def _is_test_module(filepath: str) -> bool:
+    """pytest-style module: `test_*.py`, or anything under test/ or tests/."""
+    path = Path(filepath)
+    return path.name.startswith("test_") or any(
+        part in ("test", "tests") for part in path.parts[:-1])
+
+
+def _is_launch_candidate(filepath: str, name: str) -> bool:
+    """`*.launch.py` always; `*_launch.py` only when it looks like launch code.
+
+    The underscore suffix is also an ordinary module name ending (a pytest
+    `test_http_launch.py`, a `fake_launch.py` process stub). Such a file
+    counts only when its syntax tree binds the entry point at module scope,
+    or imports a launch package outside a test module. A mention in a
+    comment or docstring does neither. The raw text decides only when the
+    file cannot be parsed, so a broken launch file is still reported. Same
+    rule as the Stop hook's launch check.
+    """
+    if name.endswith(".launch.py"):
+        return True
+    if not name.endswith("_launch.py"):
+        return False
+    try:
+        raw = Path(filepath).read_bytes()
+    except OSError:
+        return True  # let validate_file report the read error
+    try:
+        tree = ast.parse(importlib.util.decode_source(raw), filename=filepath)
+    except (SyntaxError, UnicodeDecodeError, ValueError):
+        return bool(_LAUNCH_SOURCE_HINT.search(raw.decode("utf-8", "replace")))
+    if _module_symbols(tree.body).get("generate_launch_description", _MISSING) != _MISSING:
+        return True
+    return not _is_test_module(filepath) and _imports_launch(tree)
+
+
 def validate_directory(dirpath: str) -> ValidationResult:
     """Validate all launch files in a directory."""
     result = ValidationResult()
 
-    for root, _, files in os.walk(dirpath):
+    for root, dirs, files in os.walk(dirpath):
+        dirs[:] = sorted(d for d in dirs
+                         if not d.startswith(".") and d not in _SKIP_DIRS)
         for f in sorted(files):
-            # Both official Python launch naming conventions.
-            if f.endswith(".launch.py") or f.endswith("_launch.py"):
-                filepath = os.path.join(root, f)
+            filepath = os.path.join(root, f)
+            if _is_launch_candidate(filepath, f):
                 issues = validate_file(filepath)
                 result.issues.extend(issues)
                 result.files_checked += 1

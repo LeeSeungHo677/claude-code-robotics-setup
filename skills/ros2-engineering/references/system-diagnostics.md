@@ -128,6 +128,14 @@ Boundary components should also **report degraded, not just failed**: a bridge
 that is reconnecting is materially different from one that is down, and
 consumers can react (stop accepting goals) before the data disappears.
 
+A closed-source controller or planner decides from state you cannot see on ROS
+topics. Do not infer why it stopped or diverted from the graph alone. Obtain its
+own decision, state-machine, or fault log, align it with the recorded ROS data
+by timestamp (same clock check as section 2), and record which internal check or
+transition the log reports as firing, not only that the robot stopped. The
+earliest decision evidence, not the loudest downstream symptom, is the one to
+keep (section 2).
+
 ## 4. Bridge nodes: executors meeting other event loops
 
 The node that owns a boundary usually runs two schedulers at once — a ROS 2
@@ -144,19 +152,19 @@ WebSocket loop). This is where the same failure keeps being reintroduced:
   the reverse) without a deliberate integration means one of them starves
   whenever the other is busy. Run the executor in its own thread and hand data
   across with a queue, or use the client library's supported async model
-  (`SKILL.md` Principle 8).
+  (`references/engineering-principles.md` Principle 8).
 - **Reconnect storms.** Retry with bounded exponential backoff. An unbounded
   retry loop competes for the same degraded link and turns a recoverable
   dropout into a permanent one.
 - **State on reconnect.** After the link returns, decide explicitly what is
   stale: latched topics need republishing, lifecycle nodes may need
-  reactivation, and any command received before the drop must be discarded
-  rather than replayed (`references/safety-estop.md` §5).
+  reactivation, and buffered commands require the
+  [recovery policy](evidence-progression.md#5-recovery-without-stale-command-replay).
 
-A bridge node is a resource-owning node in the sense of `SKILL.md` Principle 9 —
-lifecycle transitions give the system a defined way to take it out of service
-when the far side is gone, instead of leaving a half-connected node publishing
-stale data.
+A bridge node is a resource-owning node in the sense of
+`references/engineering-principles.md` Principle 9 — lifecycle transitions give
+the system a defined way to take it out of service when the far side is gone,
+instead of leaving a half-connected node publishing stale data.
 
 ## 5. Symptom to layer table
 
@@ -173,6 +181,7 @@ confirms it before you start changing configuration.
 | Node alive, callbacks stopped | executor blocked by a bridge or vendor call | `py-spy dump` / `gdb` thread backtrace; check callback groups |
 | Everything recovers except one node | error-state lifecycle node or stale latched data | `ros2 lifecycle list`; re-check latched topics after reconnect |
 | Behavior differs after a reconnect | stale config or a duplicate process from the restart | `references/runtime-provenance.md`, "Stale daemon vs real processes" |
+| Robot stops or diverts; topics show only the effect | a vendor controller's internal check fired | timestamp-align the vendor decision log with the bag (section 3) |
 
 ## 6. Common failures and fixes
 
@@ -189,6 +198,7 @@ confirms it before you start changing configuration.
 ---
 
 **See also:** `references/runtime-provenance.md` for "what is actually running",
+`references/evidence-progression.md` for latched-state and recovery evidence,
 `references/debugging.md` for tracing, rosbag2, and DDS-level tools,
 `references/system-bringup.md` for udev, boot ordering, and watchdogs,
 `references/nodes-executors.md` for executor and callback-group behavior.

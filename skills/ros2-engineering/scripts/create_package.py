@@ -19,6 +19,24 @@ from typing import Optional
 from xml.sax.saxutils import escape as _xml_escape, quoteattr as _xml_quoteattr
 
 
+def _package_path(name: str, dest: Path) -> Path:
+    """Preflight an existing package before any generator writes through it."""
+    if not re.fullmatch(r'[a-z][a-z0-9_]*', name):
+        raise ValueError('Package name must be lowercase snake_case')
+    pkg = Path(dest) / name
+    if pkg.is_symlink() or (pkg.is_dir() and any(p.is_symlink() for p in pkg.rglob('*'))):
+        raise ValueError('Refusing to write a package containing a symlink')
+    if pkg.exists() and not pkg.is_dir():
+        raise ValueError('Package destination is not a directory')
+    return pkg
+
+
+def _validate_maintainer_name(name: str) -> None:
+    # This value is also emitted into source comments, not only escaped XML.
+    if not name.strip() or any(ord(c) < 32 or ord(c) == 127 for c in name):
+        raise ValueError('Maintainer name must be nonempty and contain no control characters')
+
+
 def _write(path: Path, text: str) -> None:
     """Write text to a file with explicit UTF-8 encoding (Windows safe)."""
     path.write_text(text, encoding='utf-8')
@@ -58,12 +76,129 @@ _APACHE2_CPP = """// Copyright 2024 {maintainer}
 """
 
 
+# Generated Python entry points own SIGINT/SIGTERM. With rclpy's default
+# handlers a signal makes a native signal thread shut the context down and
+# trigger the executor's guard conditions while the main thread, woken by
+# KeyboardInterrupt, is already destroying the node and executor: an
+# intermittent SIGSEGV at shutdown (observed on Humble, rclpy 3.3). Here the
+# handler only records the request; the main thread leaves the spin loop and
+# cleans up once, in order (references/nodes-executors.md section 1).
+_PYTHON_SIGNAL_IMPORT = """
+try:
+    from rclpy.signals import SignalHandlerOptions
+except ImportError:  # Foxy predates SignalHandlerOptions
+    SignalHandlerOptions = None"""
+
+
+def _python_main(class_name: str) -> str:
+    return f"""def main(args=None):
+    stop_requested = []
+
+    def request_stop(signum, frame):
+        stop_requested.append(signum)  # record only; no cleanup, no exception
+
+    if SignalHandlerOptions is None:
+        rclpy.init(args=args)
+    else:
+        rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
+    previous = {{sig: signal.signal(sig, request_stop)
+                for sig in (signal.SIGINT, signal.SIGTERM)}}
+    node = None
+    executor = None
+    try:
+        node = {class_name}Node()
+        executor = SingleThreadedExecutor()
+        executor.add_node(node)
+        while rclpy.ok() and not stop_requested:
+            executor.spin_once(timeout_sec=0.1)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass  # an interrupt before the handler was installed, or an external shutdown
+    finally:
+        try:
+            if executor is not None:
+                if node is not None:
+                    executor.remove_node(node)
+                executor.shutdown()
+            if node is not None:
+                node.destroy_node()
+        finally:
+            rclpy.try_shutdown()
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
+"""
+
+
 def _copyright_py(maintainer: str = "TODO") -> str:
+    _validate_maintainer_name(maintainer)
     return _APACHE2_PY.format(maintainer=maintainer)
 
 
 def _copyright_cpp(maintainer: str = "TODO") -> str:
+    _validate_maintainer_name(maintainer)
     return _APACHE2_CPP.format(maintainer=maintainer)
+
+
+# Emitted into each lifecycle launch so installed packages are self-contained.
+# GetState is authoritative even if the VOLATILE transition-event sample was lost.
+_LIFECYCLE_ACTIVATION = """async def _activate_when_configured(context, node, activate_event, timeout=15.0,
+                                    request_timeout=1.0):
+    ros_node = get_ros_node(context)
+    client = ros_node.create_client(
+        lifecycle_msgs.srv.GetState, node.node_name + '/get_state')
+    deadline = time.monotonic() + timeout
+    requested = False
+    future = None
+    request_deadline = deadline
+    read_timeouts = 0
+    last_state = 'service unavailable'
+    try:
+        while not context.is_shutdown:
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f'Lifecycle startup timed out for {node.node_name}: {last_state}; '
+                    f'GetState timeouts: {read_timeouts}')
+            if future is None:
+                if not client.service_is_ready():
+                    await asyncio.sleep(0.05)
+                    continue
+                future = client.call_async(lifecycle_msgs.srv.GetState.Request())
+                request_deadline = min(deadline, time.monotonic() + request_timeout)
+            if not future.done():
+                if time.monotonic() >= request_deadline:
+                    # Retire a lost read without replaying a state-changing command.
+                    future.cancel()
+                    client.remove_pending_request(future)
+                    future = None
+                    read_timeouts += 1
+                await asyncio.sleep(0.05)
+                continue
+            response = future.result()
+            future = None
+            if response is None:
+                raise RuntimeError(f'No lifecycle state returned for {node.node_name}')
+            state = response.current_state
+            last_state = f'{state.label} ({state.id})'
+            if state.id == lifecycle_msgs.msg.State.PRIMARY_STATE_ACTIVE:
+                return
+            if state.id == lifecycle_msgs.msg.State.PRIMARY_STATE_FINALIZED:
+                raise RuntimeError(f'{node.node_name} finalized during startup')
+            if state.id == lifecycle_msgs.msg.State.PRIMARY_STATE_INACTIVE and not requested:
+                # Exactly one activation request; never reactivate operator-stopped nodes.
+                context.emit_event_sync(activate_event)
+                requested = True
+            await asyncio.sleep(0.05)
+    except asyncio.CancelledError:
+        if not context.is_shutdown:
+            raise
+    finally:
+        if future is not None and not future.done():
+            future.cancel()
+        # During launch shutdown the ROS adapter owns destruction of its clients.
+        if not context.is_shutdown:
+            ros_node.destroy_client(client)
+
+
+"""
 
 
 def _generate_launch_file(name: str, lifecycle: bool = False,
@@ -72,18 +207,22 @@ def _generate_launch_file(name: str, lifecycle: bool = False,
     header = _copyright_py(maintainer_name)
     if lifecycle:
         return header + f"""
+import asyncio
+import time
+
 from launch import LaunchDescription
-from launch.actions import EmitEvent, RegisterEventHandler
+from launch.actions import EmitEvent, OpaqueCoroutine
 from launch.events import matches_action
 from launch.substitutions import PathJoinSubstitution
 from launch_ros.actions import LifecycleNode
-from launch_ros.event_handlers import OnStateTransition
 from launch_ros.events.lifecycle import ChangeState
+from launch_ros.ros_adapters import get_ros_node
 from launch_ros.substitutions import FindPackageShare
 import lifecycle_msgs.msg
+import lifecycle_msgs.srv
 
 
-def generate_launch_description():
+{_LIFECYCLE_ACTIVATION}def generate_launch_description():
     config = PathJoinSubstitution([
         FindPackageShare('{name}'), 'config', 'params.yaml'
     ])
@@ -105,21 +244,14 @@ def generate_launch_description():
             transition_id=lifecycle_msgs.msg.Transition.TRANSITION_CONFIGURE,
         )
     )
-    # Auto-activate after configure succeeds
-    activate_event = RegisterEventHandler(
-        OnStateTransition(
-            target_lifecycle_node=node,
-            start_state='configuring',
-            goal_state='inactive',
-            entities=[
-                EmitEvent(event=ChangeState(
-                    lifecycle_node_matcher=matches_action(node),
-                    transition_id=lifecycle_msgs.msg.Transition.TRANSITION_ACTIVATE,
-                )),
-            ],
-        )
+    # Query actual state: an early transition_event can precede DDS discovery.
+    activate_event = ChangeState(
+        lifecycle_node_matcher=matches_action(node),
+        transition_id=lifecycle_msgs.msg.Transition.TRANSITION_ACTIVATE,
     )
-    return LaunchDescription([node, configure_event, activate_event])
+    activate_action = OpaqueCoroutine(
+        coroutine=_activate_when_configured, args=[node, activate_event])
+    return LaunchDescription([node, configure_event, activate_action])
 """
     else:
         return header + f"""
@@ -166,7 +298,7 @@ See `config/params.yaml` for default parameters.
 def create_cpp_package(name: str, dest: Path, component: bool = False,
                        maintainer_name: str = "TODO",
                        maintainer_email: str = "todo@todo.com") -> None:
-    pkg = dest / name
+    pkg = _package_path(name, dest)
     dirs = [
         pkg / "include" / name,
         pkg / "src",
@@ -183,6 +315,8 @@ def create_cpp_package(name: str, dest: Path, component: bool = False,
     if component:
         component_cmake = f"""
 find_package(rclcpp_components REQUIRED)
+target_link_libraries(${{PROJECT_NAME}}_lib PUBLIC rclcpp_components::component)
+ament_export_dependencies(rclcpp_components)
 rclcpp_components_register_node(${{PROJECT_NAME}}_lib
   PLUGIN "{name}::{_class_name(name)}Node"
   EXECUTABLE ${{PROJECT_NAME}}_component_node
@@ -231,8 +365,12 @@ if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
   find_package(ament_cmake_gtest REQUIRED)
+  find_package(std_msgs REQUIRED)
   ament_add_gtest(test_{name} test/test_{name}.cpp)
-  target_link_libraries(test_{name} ${{PROJECT_NAME}}_lib)
+  target_link_libraries(test_{name}
+    ${{PROJECT_NAME}}_lib
+    std_msgs::std_msgs__rosidl_typesupport_cpp
+  )
 endif()
 
 ament_export_targets(export_${{PROJECT_NAME}} HAS_LIBRARY_TARGET)
@@ -286,35 +424,36 @@ namespace {name}
 {class_name}Node::{class_name}Node(const rclcpp::NodeOptions & options)
 : LifecycleNode("{name}", options)
 {{
+  declare_parameter("publish_rate", 50.0);
   RCLCPP_INFO(get_logger(), "Node created");
 }}
 
 {class_name}Node::CallbackReturn
-{class_name}Node::on_configure(const rclcpp_lifecycle::State &)
+{class_name}Node::on_configure(const rclcpp_lifecycle::State & state)
 {{
   RCLCPP_INFO(get_logger(), "Configuring...");
-  return CallbackReturn::SUCCESS;
+  return LifecycleNode::on_configure(state);
 }}
 
 {class_name}Node::CallbackReturn
-{class_name}Node::on_activate(const rclcpp_lifecycle::State &)
+{class_name}Node::on_activate(const rclcpp_lifecycle::State & state)
 {{
   RCLCPP_INFO(get_logger(), "Activating...");
-  return CallbackReturn::SUCCESS;
+  return LifecycleNode::on_activate(state);
 }}
 
 {class_name}Node::CallbackReturn
-{class_name}Node::on_deactivate(const rclcpp_lifecycle::State &)
+{class_name}Node::on_deactivate(const rclcpp_lifecycle::State & state)
 {{
   RCLCPP_INFO(get_logger(), "Deactivating...");
-  return CallbackReturn::SUCCESS;
+  return LifecycleNode::on_deactivate(state);
 }}
 
 {class_name}Node::CallbackReturn
-{class_name}Node::on_cleanup(const rclcpp_lifecycle::State &)
+{class_name}Node::on_cleanup(const rclcpp_lifecycle::State & state)
 {{
   RCLCPP_INFO(get_logger(), "Cleaning up...");
-  return CallbackReturn::SUCCESS;
+  return LifecycleNode::on_cleanup(state);
 }}
 
 void {class_name}Node::on_offered_qos_incompatible(
@@ -363,6 +502,8 @@ int main(int argc, char ** argv)
     _write(pkg / "test" / f"test_{name}.cpp", cpp_header + f"""
 #include <gtest/gtest.h>
 #include <rclcpp/rclcpp.hpp>
+#include <lifecycle_msgs/msg/state.hpp>
+#include <std_msgs/msg/string.hpp>
 #include "{name}/{name}_node.hpp"
 
 class {class_name}Test : public ::testing::Test
@@ -383,6 +524,27 @@ TEST_F({class_name}Test, NodeCreation)
   auto node = std::make_shared<{name}::{class_name}Node>();
   ASSERT_NE(node, nullptr);
 }}
+
+TEST_F({class_name}Test, PublishRateOverride)
+{{
+  rclcpp::NodeOptions options;
+  options.parameter_overrides({{rclcpp::Parameter("publish_rate", 17.0)}});
+  auto node = std::make_shared<{name}::{class_name}Node>(options);
+  EXPECT_DOUBLE_EQ(node->get_parameter("publish_rate").as_double(), 17.0);
+}}
+
+TEST_F({class_name}Test, ManagedPublisherTransitions)
+{{
+  auto node = std::make_shared<{name}::{class_name}Node>();
+  auto publisher = node->create_publisher<std_msgs::msg::String>("managed_probe", 10);
+  EXPECT_FALSE(publisher->is_activated());
+  ASSERT_EQ(node->configure().id(), lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE);
+  ASSERT_EQ(node->activate().id(), lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE);
+  EXPECT_TRUE(publisher->is_activated());
+  ASSERT_EQ(node->deactivate().id(), lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE);
+  EXPECT_FALSE(publisher->is_activated());
+  ASSERT_EQ(node->cleanup().id(), lifecycle_msgs::msg::State::PRIMARY_STATE_UNCONFIGURED);
+}}
 """)
 
     # Generate launch file (lifecycle=True since C++ template uses LifecycleNode)
@@ -400,7 +562,8 @@ TEST_F({class_name}Test, NodeCreation)
     _write_package_xml(pkg, name, "ament_cmake", deps,
                        maintainer_name=maintainer_name,
                        maintainer_email=maintainer_email,
-                       extra_exec=["launch", "launch_ros", "lifecycle_msgs"])
+                       extra_exec=["launch", "launch_ros", "lifecycle_msgs", "rclpy"],
+                       extra_test=["std_msgs"])
     print(f"Created C++ package: {pkg}")
 
 
@@ -409,56 +572,85 @@ def _generate_python_lifecycle_node(name: str, class_name: str,
     """Generate a Python LifecycleNode with proper callback hooks."""
     py_header = _copyright_py(maintainer_name)
     return py_header + f"""
+import math
+import signal
+
 import rclpy
+from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.lifecycle import LifecycleNode, LifecycleState, TransitionCallbackReturn
+{_PYTHON_SIGNAL_IMPORT}
 
 
 class {class_name}Node(LifecycleNode):
 
     def __init__(self, **kwargs):
         super().__init__('{name}', **kwargs)
+        # Declare once: cleanup/reconfigure must not redeclare the parameter.
+        self.declare_parameter('publish_rate', 50.0)
+        self.timer = None
+        self._timer_period = None
         self.get_logger().info('Node created (inactive)')
 
     def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
-        self.declare_parameter('publish_rate', 50.0)
         rate = self.get_parameter('publish_rate').value
+        if type(rate) not in (int, float) or not math.isfinite(rate) or rate <= 0:
+            self.get_logger().error('publish_rate must be finite and positive')
+            return TransitionCallbackReturn.FAILURE
+        period = 1.0 / rate
+        # rcl timers use a signed 64-bit nanosecond duration; zero would busy-loop.
+        if not math.isfinite(period) or not 1.0 <= period * 1e9 < 2.0 ** 63:
+            self.get_logger().error('publish_rate is outside the timer duration range')
+            return TransitionCallbackReturn.FAILURE
         self.get_logger().info(f'Configuring with rate={{rate}} Hz')
-        self._timer_period = 1.0 / rate
-        return TransitionCallbackReturn.SUCCESS
+        self._timer_period = period
+        result = super().on_configure(state)
+        if result != TransitionCallbackReturn.SUCCESS:
+            self._timer_period = None
+        return result
 
     def on_activate(self, state: LifecycleState) -> TransitionCallbackReturn:
+        if self._timer_period is None:
+            return TransitionCallbackReturn.FAILURE
+        result = super().on_activate(state)
+        if result != TransitionCallbackReturn.SUCCESS:
+            return result
         self.timer = self.create_timer(self._timer_period, self.timer_callback)
         self.get_logger().info('Activated')
         return TransitionCallbackReturn.SUCCESS
 
     def on_deactivate(self, state: LifecycleState) -> TransitionCallbackReturn:
-        self.destroy_timer(self.timer)
+        self._release_timer()
         self.get_logger().info('Deactivated')
-        return TransitionCallbackReturn.SUCCESS
+        return super().on_deactivate(state)
 
     def on_cleanup(self, state: LifecycleState) -> TransitionCallbackReturn:
+        self._release_timer()
+        self._timer_period = None
         self.get_logger().info('Cleaning up')
-        return TransitionCallbackReturn.SUCCESS
+        return super().on_cleanup(state)
 
     def on_shutdown(self, state: LifecycleState) -> TransitionCallbackReturn:
+        self._release_timer()
+        self._timer_period = None
         self.get_logger().info('Shutting down')
-        return TransitionCallbackReturn.SUCCESS
+        return super().on_shutdown(state)
+
+    def on_error(self, state: LifecycleState) -> TransitionCallbackReturn:
+        self._release_timer()
+        self._timer_period = None
+        return super().on_error(state)
+
+    def _release_timer(self):
+        # Ordinary timers are not disabled by lifecycle state changes themselves.
+        if self.timer is not None:
+            self.destroy_timer(self.timer)
+            self.timer = None
 
     def timer_callback(self):
         pass  # Implement your logic here
 
 
-def main(args=None):
-    rclpy.init(args=args)
-    node = {class_name}Node()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
-
+{_python_main(class_name)}
 
 if __name__ == '__main__':
     main()
@@ -469,7 +661,7 @@ def create_python_package(name: str, dest: Path,
                           maintainer_name: str = "TODO",
                           maintainer_email: str = "todo@todo.com",
                           lifecycle: bool = False) -> None:
-    pkg = dest / name
+    pkg = _package_path(name, dest)
     dirs = [
         pkg / name,
         pkg / "launch",
@@ -493,46 +685,69 @@ def create_python_package(name: str, dest: Path,
         _write(pkg / name / f"{name}_node.py", lifecycle_src)
     else:
         _write(pkg / name / f"{name}_node.py", py_header + f"""
+import math
+import signal
+
 import rclpy
+from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.node import Node
+{_PYTHON_SIGNAL_IMPORT}
 
 
 class {class_name}Node(Node):
 
     def __init__(self, **kwargs):
         super().__init__('{name}', **kwargs)
-        self.declare_parameter('publish_rate', 50.0)
-        rate = self.get_parameter('publish_rate').value
-        self.timer = self.create_timer(1.0 / rate, self.timer_callback)
+        try:
+            self.declare_parameter('publish_rate', 50.0)
+            rate = self.get_parameter('publish_rate').value
+            if type(rate) not in (int, float) or not math.isfinite(rate) or rate <= 0:
+                raise ValueError('publish_rate must be finite and positive')
+            period = 1.0 / rate
+            if not math.isfinite(period) or not 1.0 <= period * 1e9 < 2.0 ** 63:
+                raise ValueError('publish_rate is outside the timer duration range')
+            self.timer = self.create_timer(period, self.timer_callback)
+        except Exception:
+            # A failed constructor never reaches main()'s node assignment.
+            self.destroy_node()
+            raise
         self.get_logger().info('Node started')
 
     def timer_callback(self):
         pass  # Implement your logic here
 
-    # QoS event callbacks — attach to publishers/subscribers via
-    # event_callbacks=QoSEventHandler(incompatible_qos_callback=self.on_qos_event)
+    # QoS event callbacks: to be told when a peer offers or requests incompatible
+    # QoS, pass event_callbacks when creating the endpoint. The lines between the
+    # markers are a working example for __init__; uncomment them there.
+    # rclpy.qos_event is the module name on Humble; later releases use
+    # rclpy.event_handler and Lyrical removed the old name.
+    # --- qos event example: begin ---
+    # try:
+    #     from rclpy.event_handler import PublisherEventCallbacks, SubscriptionEventCallbacks
+    # except ImportError:  # Humble
+    #     from rclpy.qos_event import PublisherEventCallbacks, SubscriptionEventCallbacks
+    # from rcl_interfaces.msg import Log
+    # self.example_sub = self.create_subscription(
+    #     Log, 'example', lambda msg: None, 10,
+    #     event_callbacks=SubscriptionEventCallbacks(incompatible_qos=self.on_qos_event))
+    # self.example_pub = self.create_publisher(
+    #     Log, 'example', 10,
+    #     event_callbacks=PublisherEventCallbacks(incompatible_qos=self.on_qos_event))
+    # --- qos event example: end ---
     def on_qos_event(self, event):
         self.get_logger().warn(
             f'QoS incompatibility detected: {{event.last_policy_kind}}')
 
 
-def main(args=None):
-    rclpy.init(args=args)
-    node = {class_name}Node()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
-
+{_python_main(class_name)}
 
 if __name__ == '__main__':
     main()
 """)
 
     _write(pkg / "setup.py", py_header + f"""
+from glob import glob
+
 from setuptools import find_packages, setup
 
 package_name = '{name}'
@@ -544,7 +759,7 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        ('share/' + package_name + '/launch', ['launch/bringup.launch.py']),
+        ('share/' + package_name + '/launch', sorted(glob('launch/*.launch.py'))),
         ('share/' + package_name + '/config', ['config/params.yaml']),
     ],
     install_requires=['setuptools'],
@@ -687,7 +902,7 @@ def test_pep257():
 def create_interfaces_package(name: str, dest: Path,
                               maintainer_name: str = "TODO",
                               maintainer_email: str = "todo@todo.com") -> None:
-    pkg = dest / name
+    pkg = _package_path(name, dest)
     dirs = [pkg / "msg", pkg / "srv", pkg / "action"]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
@@ -740,18 +955,214 @@ ament_package()
     print(f"Created interfaces package: {pkg}")
 
 
+# ros2_control hardware component API probe. The generated CMakeLists.txt
+# compiles cmake/hw_api_probe (below) with try_compile() at configure time:
+# Jazzy 4.x and Kilted 5.x still carry the deprecated manual export methods,
+# ros2_control 6.12 removed them (and the double* Handle constructor), and
+# Humble 2.x has only the manual ones. The probe is a separate C and C++
+# project rather than check_cxx_source_compiles(): the ROS imported targets
+# need both languages enabled, and a C++-only scratch project fails on CMake
+# 4.x with "No known features for C compiler". Keeping the C++ out of the
+# CMake text also keeps ament_lint_cmake satisfied.
+HW_API_PROBE_CMAKE = """try_compile(HW_API_PROBE_COMPILED
+  ${CMAKE_CURRENT_BINARY_DIR}/hw_api_probe
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hw_api_probe
+  HardwareApiProbe
+  hw_api_probe
+  CMAKE_FLAGS
+    "-Dhardware_interface_DIR=${hardware_interface_DIR}"
+    "-Drclcpp_DIR=${rclcpp_DIR}"
+    "-Drclcpp_lifecycle_DIR=${rclcpp_lifecycle_DIR}"
+  OUTPUT_VARIABLE HW_API_PROBE_OUTPUT
+)
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/hw_api_probe.log "${HW_API_PROBE_OUTPUT}")
+if(HW_API_PROBE_COMPILED)
+  set(HARDWARE_INTERFACE_HAS_ON_EXPORT_INTERFACES 1 CACHE INTERNAL
+    "ros2_control exposes on_export_*_interfaces() and the handle accessors")
+  add_definitions(-DHARDWARE_INTERFACE_HAS_ON_EXPORT_INTERFACES)
+  message(STATUS "ros2_control: framework-managed interfaces (on_export_*_interfaces)")
+else()
+  set(HARDWARE_INTERFACE_HAS_ON_EXPORT_INTERFACES "" CACHE INTERNAL
+    "ros2_control exposes only the manual export_*_interfaces() (Humble 2.x)")
+  message(STATUS "ros2_control: manual export_*_interfaces (Humble 2.x API)")
+endif()"""
+
+HW_API_PROBE_PROJECT = """# Compiled by the parent CMakeLists.txt through try_compile() to detect the
+# ros2_control hardware component API. It is never built into the package.
+# Every failure is a compile failure, never a configure error, so the parent
+# always receives a plain TRUE or FALSE.
+cmake_minimum_required(VERSION 3.8)
+project(HardwareApiProbe LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(hardware_interface QUIET)
+find_package(rclcpp QUIET)
+find_package(rclcpp_lifecycle QUIET)
+
+add_executable(hw_api_probe main.cpp)
+if(hardware_interface_FOUND AND rclcpp_FOUND AND rclcpp_lifecycle_FOUND)
+  target_link_libraries(hw_api_probe PRIVATE
+    hardware_interface::hardware_interface
+    rclcpp::rclcpp
+    rclcpp_lifecycle::rclcpp_lifecycle
+  )
+else()
+  target_compile_definitions(hw_api_probe PRIVATE HW_API_PROBE_MISSING_DEPENDENCIES)
+endif()
+"""
+
+# Every framework-managed accessor the generated code relies on must exist with
+# these signatures, or the manual export path is built instead.
+HW_API_PROBE_SOURCE = """
+#ifdef HW_API_PROBE_MISSING_DEPENDENCIES
+#error "ros2_control, rclcpp, or rclcpp_lifecycle was not found for the API probe"
+#endif
+
+#include <vector>
+
+#include <hardware_interface/system_interface.hpp>
+
+// Configure-time probe for the framework-managed hardware component API.
+// It is compiled, never linked into the package or executed.
+class HardwareApiProbe : public hardware_interface::SystemInterface
+{
+public:
+  std::vector<hardware_interface::StateInterface::ConstSharedPtr>
+  on_export_state_interfaces() override
+  {
+    return {};
+  }
+
+  bool uses_handle_accessors()
+  {
+    const auto & state = get_state_interface_handle("joint/position");
+    const auto & command = get_command_interface_handle("joint/position");
+    double value = 0.0;
+    const bool state_set = set_state(state, value, false);
+    const bool command_read = get_command(command, value, false);
+    const bool command_set = set_command(command, value, false);
+    return state_set && command_read && command_set;
+  }
+};
+
+int main()
+{
+  return 0;
+}
+"""
+
+HW_HEADER_MODERN_MEMBERS = """#ifdef HARDWARE_INTERFACE_HAS_ON_EXPORT_INTERFACES
+  // Framework-managed interfaces (ros2_control >= 4.x): the handles are looked
+  // up once in on_configure(); read() and write() use only the non-blocking
+  // handle accessors, never the name-based helpers (not real-time safe).
+  // An entry is nullptr when the URDF does not declare that interface.
+  std::vector<hardware_interface::StateInterface::SharedPtr> position_states_;
+  std::vector<hardware_interface::StateInterface::SharedPtr> velocity_states_;
+  std::vector<hardware_interface::CommandInterface::SharedPtr> position_commands_;
+  // State publications skipped because a handle lock was contended.
+  std::size_t missed_state_updates_{0};
+#endif"""
+
+HW_CONFIGURE_MODERN = """#ifdef HARDWARE_INTERFACE_HAS_ON_EXPORT_INTERFACES
+  // Interfaces exist from import time and read() also runs while INACTIVE, so
+  // the handles are cached here, not in on_activate(). Name lookup is not
+  // real-time safe; it happens only in this lifecycle transition.
+  const size_t joints = info_.joints.size();
+  position_states_.assign(joints, nullptr);
+  velocity_states_.assign(joints, nullptr);
+  position_commands_.assign(joints, nullptr);
+  for (size_t i = 0; i < joints; i++) {
+    const std::string position = info_.joints[i].name + "/" + hardware_interface::HW_IF_POSITION;
+    const std::string velocity = info_.joints[i].name + "/" + hardware_interface::HW_IF_VELOCITY;
+    if (joint_state_interfaces_.count(position) != 0) {
+      position_states_[i] = get_state_interface_handle(position);
+    }
+    if (joint_state_interfaces_.count(velocity) != 0) {
+      velocity_states_[i] = get_state_interface_handle(velocity);
+    }
+    if (joint_command_interfaces_.count(position) != 0) {
+      position_commands_[i] = get_command_interface_handle(position);
+    }
+  }
+#endif"""
+
+HW_ACTIVATE_MODERN = """#ifdef HARDWARE_INTERFACE_HAS_ON_EXPORT_INTERFACES
+  // Command interfaces hold NaN until a controller writes them. Start from the
+  // measured position, never an arbitrary zero, so the first write() has a
+  // finite target. Activation is not the real-time path, so waiting is allowed.
+  std::copy(hw_positions_.begin(), hw_positions_.end(), hw_commands_.begin());
+  for (size_t i = 0; i < hw_commands_.size(); i++) {
+    if (position_commands_[i] && !set_command(position_commands_[i], hw_commands_[i], true)) {
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+    if (position_states_[i] && !set_state(position_states_[i], hw_positions_[i], true)) {
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+    if (velocity_states_[i] && !set_state(velocity_states_[i], hw_velocities_[i], true)) {
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+  }
+#endif"""
+
+HW_DEACTIVATE_MODERN = """#ifdef HARDWARE_INTERFACE_HAS_ON_EXPORT_INTERFACES
+  for (size_t i = 0; i < hw_commands_.size(); i++) {
+    if (position_commands_[i] && !set_command(position_commands_[i], hw_commands_[i], true)) {
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+  }
+#endif"""
+
+HW_CLEANUP_MODERN = """#ifdef HARDWARE_INTERFACE_HAS_ON_EXPORT_INTERFACES
+  position_states_.clear();
+  velocity_states_.clear();
+  position_commands_.clear();
+#endif"""
+
+HW_READ_MODERN = """#ifdef HARDWARE_INTERFACE_HAS_ON_EXPORT_INTERFACES
+  // Non-blocking publication: a contended handle keeps its previous value for
+  // this cycle. That is counted, not treated as a hardware error.
+  for (size_t i = 0; i < hw_positions_.size(); i++) {
+    if (position_states_[i] && !set_state(position_states_[i], hw_positions_[i], false)) {
+      ++missed_state_updates_;
+    }
+    if (velocity_states_[i] && !set_state(velocity_states_[i], hw_velocities_[i], false)) {
+      ++missed_state_updates_;
+    }
+  }
+#endif"""
+
+HW_WRITE_MODERN = """#ifdef HARDWARE_INTERFACE_HAS_ON_EXPORT_INTERFACES
+  for (size_t i = 0; i < hw_commands_.size(); i++) {
+    if (!position_commands_[i]) {
+      continue;
+    }
+    double command = 0.0;
+    if (!get_command(position_commands_[i], command, false)) {
+      continue;  // contended this cycle: keep the last valid command
+    }
+    if (!std::isfinite(command)) {
+      continue;  // NaN before any controller wrote, or an invalid command: not a target
+    }
+    hw_commands_[i] = command;
+  }
+#endif"""
+
+
 def create_hardware_interface_package(
     name: str, dest: Path,
     maintainer_name: str = "TODO",
     maintainer_email: str = "todo@todo.com",
 ) -> None:
     """Generate a ros2_control hardware_interface package (C++)."""
-    pkg = dest / name
+    pkg = _package_path(name, dest)
     dirs = [
         pkg / "include" / name,
         pkg / "src",
         pkg / "config",
         pkg / "test",
+        pkg / "cmake" / "hw_api_probe",
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
@@ -759,10 +1170,16 @@ def create_hardware_interface_package(
     cpp_header = _copyright_cpp(maintainer_name)
     class_name = _class_name(name)
 
+    # --- configure-time ros2_control API probe (see HW_API_PROBE_CMAKE) ---
+    _write(pkg / "cmake" / "hw_api_probe" / "CMakeLists.txt", HW_API_PROBE_PROJECT)
+    _write(pkg / "cmake" / "hw_api_probe" / "main.cpp", cpp_header + HW_API_PROBE_SOURCE)
+
     # --- CMakeLists.txt ---
     _write(pkg / "CMakeLists.txt", f"""cmake_minimum_required(VERSION 3.8)
 project({name})
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -777,6 +1194,13 @@ find_package(rclcpp_lifecycle REQUIRED)
 if(hardware_interface_VERSION VERSION_GREATER_EQUAL "6.0.0")
   add_definitions(-DHARDWARE_INTERFACE_HAS_PARAMS_API)
 endif()
+
+# Detect the hardware component API by compiling cmake/hw_api_probe, not by
+# version: Jazzy 4.x/Kilted 5.x still carry the deprecated manual export
+# methods, ros2_control 6.12 removed them, and Humble 2.x has only the manual
+# ones. The probe is its own C and C++ project because the ROS imported
+# targets need both languages enabled.
+{HW_API_PROBE_CMAKE}
 
 add_library(${{PROJECT_NAME}} SHARED
   src/{name}_hardware.cpp
@@ -820,6 +1244,7 @@ ament_package()
     _write(pkg / "include" / name / f"{name}_hardware.hpp", cpp_header + f"""
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -860,8 +1285,13 @@ public:
   hardware_interface::CallbackReturn on_cleanup(
     const rclcpp_lifecycle::State & previous_state) override;
 
+#ifndef HARDWARE_INTERFACE_HAS_ON_EXPORT_INTERFACES
+  // Humble (2.x) exports interfaces by hand and points them at the buffers
+  // below. From Jazzy (4.x) the framework creates them from the <ros2_control>
+  // URDF tag, and ros2_control 6.12 removed these overrides.
   std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
   std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
+#endif
 
   hardware_interface::return_type read(
     const rclcpp::Time & time, const rclcpp::Duration & period) override;
@@ -870,10 +1300,13 @@ public:
     const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
 private:
-  // Joint state storage
+  // Device-side buffers of this simulated interface. With manual export they
+  // are the interface memory; with framework-managed interfaces they are
+  // copied through the cached handles in read() and write().
   std::vector<double> hw_positions_;
   std::vector<double> hw_velocities_;
   std::vector<double> hw_commands_;
+{HW_HEADER_MODERN_MEMBERS}
 }};
 
 }}  // namespace {name}
@@ -882,6 +1315,10 @@ private:
     # --- Source ---
     _write(pkg / "src" / f"{name}_hardware.cpp", cpp_header + f"""
 #include "{name}/{name}_hardware.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <string>
 
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
 #include <pluginlib/class_list_macros.hpp>
@@ -917,6 +1354,7 @@ hardware_interface::CallbackReturn {class_name}Hardware::on_configure(
   std::fill(hw_positions_.begin(), hw_positions_.end(), 0.0);
   std::fill(hw_velocities_.begin(), hw_velocities_.end(), 0.0);
   std::fill(hw_commands_.begin(), hw_commands_.end(), 0.0);
+{HW_CONFIGURE_MODERN}
   return hardware_interface::CallbackReturn::SUCCESS;
 }}
 
@@ -924,6 +1362,7 @@ hardware_interface::CallbackReturn {class_name}Hardware::on_activate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {{
   RCLCPP_INFO(rclcpp::get_logger("{name}"), "Activating...");
+{HW_ACTIVATE_MODERN}
   return hardware_interface::CallbackReturn::SUCCESS;
 }}
 
@@ -931,9 +1370,11 @@ hardware_interface::CallbackReturn {class_name}Hardware::on_deactivate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {{
   RCLCPP_INFO(rclcpp::get_logger("{name}"), "Deactivating...");
-  // SAFETY: Zero all commands to prevent the robot from holding
-  // the last commanded velocity/position on shutdown.
-  std::fill(hw_commands_.begin(), hw_commands_.end(), 0.0);
+  // These are position targets: zero would command a new position, not a stop.
+  // Retain measured positions for this simulated interface. Real hardware needs
+  // an explicit driver stop/disable and independent watchdog; this is not one.
+  std::copy(hw_positions_.begin(), hw_positions_.end(), hw_commands_.begin());
+{HW_DEACTIVATE_MODERN}
   return hardware_interface::CallbackReturn::SUCCESS;
 }}
 
@@ -941,9 +1382,11 @@ hardware_interface::CallbackReturn {class_name}Hardware::on_cleanup(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {{
   RCLCPP_INFO(rclcpp::get_logger("{name}"), "Cleaning up...");
+{HW_CLEANUP_MODERN}
   return hardware_interface::CallbackReturn::SUCCESS;
 }}
 
+#ifndef HARDWARE_INTERFACE_HAS_ON_EXPORT_INTERFACES
 std::vector<hardware_interface::StateInterface>
 {class_name}Hardware::export_state_interfaces()
 {{
@@ -967,6 +1410,7 @@ std::vector<hardware_interface::CommandInterface>
   }}
   return command_interfaces;
 }}
+#endif
 
 hardware_interface::return_type {class_name}Hardware::read(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
@@ -976,12 +1420,14 @@ hardware_interface::return_type {class_name}Hardware::read(
   for (size_t i = 0; i < hw_positions_.size(); i++) {{
     hw_positions_[i] = hw_commands_[i];
   }}
+{HW_READ_MODERN}
   return hardware_interface::return_type::OK;
 }}
 
 hardware_interface::return_type {class_name}Hardware::write(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {{
+{HW_WRITE_MODERN}
   // TODO(user): Write commands to actual hardware here
   return hardware_interface::return_type::OK;
 }}
@@ -1093,6 +1539,20 @@ ros2 control load_controller joint_state_broadcaster --set-state active
 
 - `config/controllers.yaml` — Controller manager configuration
 - `config/{name}.ros2_control.xacro` — Hardware interface URDF snippet
+
+## Command and state policy
+
+- The ros2_control API is detected when CMake configures the package: on Jazzy
+  and newer the framework creates the interfaces from the URDF and this code
+  caches their handles in `on_configure()`; on Humble the manual export path
+  is built instead.
+- `read()` and `write()` use only non-blocking handle access; a contended
+  handle keeps its previous value for that cycle.
+- A non-finite command (the NaN a command interface holds before any
+  controller writes it, or an invalid value) is not a target: the last valid
+  command is kept. On activation the command is set to the measured position.
+- This is a simulation template. It makes no real-time guarantee and provides
+  no driver stop, watchdog, or limit enforcement.
 """)
 
     _write_package_xml(
@@ -1106,45 +1566,67 @@ ros2 control load_controller joint_state_broadcaster --set-state active
 def _generate_fleet_launch(name: str, num_robots: int,
                            lifecycle: bool = False,
                            maintainer_name: str = "TODO") -> str:
-    """Generate a multi-robot fleet launch file with namespace isolation."""
+    """Generate isolated nodes with one-shot, observed-state lifecycle startup."""
     header = _copyright_py(maintainer_name)
     node_type = "LifecycleNode" if lifecycle else "Node"
-    imports = "from launch_ros.actions import Node" if not lifecycle else \
-        "from launch_ros.actions import LifecycleNode"
+    std_imports = "import asyncio\nimport time\n\n" if lifecycle else ""
+    imports = "from launch.actions import GroupAction\n"
+    if lifecycle:
+        imports = ("from launch.actions import EmitEvent, GroupAction, OpaqueCoroutine\n"
+                   "from launch.events import matches_action\n")
+    ros_imports = f"from launch_ros.actions import {node_type}, PushRosNamespace\n"
+    if lifecycle:
+        ros_imports += ("from launch_ros.events.lifecycle import ChangeState\n"
+                        "from launch_ros.ros_adapters import get_ros_node\n")
+    ros_imports += "from launch_ros.substitutions import FindPackageShare\n"
+    if lifecycle:
+        ros_imports += "import lifecycle_msgs.msg\nimport lifecycle_msgs.srv\n"
+    helper = _LIFECYCLE_ACTIVATION if lifecycle else ""
 
-    robot_blocks = []
+    definitions, groups = [], []
     for i in range(1, num_robots + 1):
-        robot_blocks.append(f"""
+        definitions.append(f"""
+    node_{i} = {node_type}(
+        package='{name}',
+        executable='{name}_node',
+        name='{name}_robot_{i}',
+        namespace='',
+        parameters=[config],
+        output='screen',
+    )
+""")
+        startup = ""
+        if lifecycle:
+            startup = f"""
+                EmitEvent(event=ChangeState(
+                    lifecycle_node_matcher=matches_action(node_{i}),
+                    transition_id=lifecycle_msgs.msg.Transition.TRANSITION_CONFIGURE,
+                )),
+                OpaqueCoroutine(coroutine=_activate_when_configured, args=[
+                    node_{i}, ChangeState(
+                        lifecycle_node_matcher=matches_action(node_{i}),
+                        transition_id=lifecycle_msgs.msg.Transition.TRANSITION_ACTIVATE,
+                    ),
+                ]),"""
+        groups.append(f"""
         GroupAction(
             scoped=True,
             actions=[
                 PushRosNamespace('robot_{i}'),
-                {node_type}(
-                    package='{name}',
-                    executable='{name}_node',
-                    name='{name}_robot_{i}',
-                    parameters=[config],
-                    output='screen',
-                ),
+                node_{i},{startup}
             ],
         ),""")
-
-    robots_str = "".join(robot_blocks)
-
     return header + f"""
-from launch import LaunchDescription
-from launch.actions import GroupAction
-from launch.substitutions import PathJoinSubstitution
-from launch_ros.actions import PushRosNamespace
-{imports}
-from launch_ros.substitutions import FindPackageShare
+{std_imports}from launch import LaunchDescription
+{imports}from launch.substitutions import PathJoinSubstitution
+{ros_imports}
 
-
-def generate_launch_description():
+{helper}def generate_launch_description():
     config = PathJoinSubstitution([
         FindPackageShare('{name}'), 'config', 'params.yaml'
     ])
-    return LaunchDescription([{robots_str}
+{''.join(definitions)}
+    return LaunchDescription([{''.join(groups)}
     ])
 """
 
@@ -1221,7 +1703,7 @@ ros2 security create_keystore ~/sros2_keystore
 ros2 security create_enclave ~/sros2_keystore /{name}
 
 # Generate permissions from policies
-ros2 security create_permission ~/sros2_keystore /{name} \\
+ros2 security create_permission ~/sros2_keystore /{name} \
   security/policies.xml
 
 # Run with security enabled
@@ -1332,7 +1814,7 @@ def main():
     if args.robots < 0:
         parser.error(f"--robots must be >= 0 (got {args.robots})")
 
-    if not re.match(r'^[a-z][a-z0-9_]*$', args.name):
+    if not re.fullmatch(r'[a-z][a-z0-9_]*', args.name):
         print(f"Error: Package name '{args.name}' is invalid. "
               "Use snake_case (lowercase letters, digits, underscores; "
               "must start with a letter).", file=sys.stderr)
@@ -1342,13 +1824,18 @@ def main():
     # would still be problematic inside an XML attribute. We intentionally
     # allow internal addresses without a TLD (e.g. `dev@localhost`) and
     # leave full RFC 5322 validation out of scope.
-    if not re.match(r'^[^\s<>"\']+@[^\s<>"\']+$', args.maintainer_email):
+    if not re.fullmatch(r'[^\s<>"\']+@[^\s<>"\']+', args.maintainer_email):
         print(f"Error: Maintainer email '{args.maintainer_email}' appears "
               f"invalid (must contain '@' and no whitespace or quote chars).",
               file=sys.stderr)
         sys.exit(1)
 
     dest = Path(args.dest)
+    try:
+        _validate_maintainer_name(args.maintainer_name)
+        _package_path(args.name, dest)
+    except ValueError as exc:
+        parser.error(str(exc))
     if not dest.exists():
         dest.mkdir(parents=True)
 
@@ -1381,6 +1868,11 @@ def main():
             maintainer_name=m_name)
         fleet_path = dest / args.name / "launch" / "fleet.launch.py"
         _write(fleet_path, fleet_content)
+        # This private config is passed explicitly to each generated fleet node.
+        # Their remapped names/namespaces cannot match the single-node YAML key.
+        config_path = dest / args.name / "config" / "params.yaml"
+        config = config_path.read_text(encoding='utf-8')
+        _write(config_path, config.replace(args.name + ':', '/**:', 1))
         print(f"  + fleet launch for {args.robots} robots: {fleet_path}")
 
     if args.sros2:

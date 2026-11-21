@@ -61,3 +61,19 @@ description: >
 - `FileLogger` / `StdCoutLogger` 로 틱 전이를 기록해 rosbag 시각과 대조한다.
 - 트리를 실기에 붙이기 전에 **가짜 액션 서버로 단위 테스트**한다. BT 로직 버그와
   하드웨어 문제를 동시에 디버깅하지 않는다.
+
+## BT.CPP 4.9 ~ 4.11 변경 메모 (2026-11 기준)
+
+**먼저 설치 버전을 본다** — 아래는 v4 최신 기능이다. ROS 2 Humble 의 apt 에는 `ros-humble-behaviortree-cpp-v3`
+(3.8.x, Nav2 Humble 이 쓰는 것)만 있을 수 있다: `dpkg-query -W 'ros-*behaviortree*'`. 설치본에 없는 노드를 XML 에 쓰면 로드에서 실패한다.
+
+| 버전 | 쓸 만한 것 | 주의할 동작 변경 |
+|---|---|---|
+| 4.9.0 | `TryCatch` (실패·halt 시에만 cleanup), tick 예외가 `NodeExecutionError`(노드 경로 포함)로 감싸짐, 재귀 서브트리·깊은 XML(256) 파싱 시 오류 | 스크립트 산술이 좌결합으로 수정 (`A - B + C`) — 옛 결과에 맞춘 식이 있으면 값이 바뀐다 |
+| 4.11.0 | **`Finally`** (main 뒤 cleanup 을 성공·실패·예외·halt 모두에서 실행 — 팔 정지·충돌검사 복구 같은 정리 동작에 맞다; `halt_timeout_msec` 은 부모를 그만큼 막으므로 짧게) · **`_onlyIf` / `_onStart`** 전제조건 · XSD+Schematron 검증(`tools/validate_xml.py`) · `subscribeToInputPort()` · **`Groot2Publisher(tree, port, "127.0.0.1")`** · 다른 스레드의 `haltTree()` 가 `tickWhileRunning()` 을 실제로 멈춤 · 타이머 노드(Sleep/Delay/Timeout) use-after-free·경합 수정 | `Finally`·`_onlyIf`·`_onStart` 예약어 · SubTree 리터럴이 다시 문자열(`"1" + "2"` = `"12"`) · `_autoremap` 시 모델 기본값 적용 · 로드 시 거부 늘어남(규칙 어긋난 ID, AsyncFallback 섞인 ReactiveSequence, 연산자 ~255 초과) · JSON/float 범위 초과는 조용히 자르지 않고 throw · `Blackboard::getKeys()` deprecated → `getKeyNames()` |
+| 4.11.1 | 로드 실패 시 그 호출이 등록한 트리 전체 롤백, `~Tree()` 가 halt 예외로 terminate 하지 않음 | JsonExporter 타입 불일치가 `LogicError` |
+
+- **Groot2 포트는 인증이 없다** — 닿는 사람이 훅을 넣어 노드 결과를 바꿀 수 있다. 실기에서는 bind 주소를 `127.0.0.1` 로 주고 SSH 터널로 본다. 기존 2인자 생성자는 여전히 모든 인터페이스에 bind 한다.
+- 4.11 은 4.10 과 ABI 호환이지만 위 동작 변경 때문에 **기존 트리 XML 을 전부 로드·단위 테스트로 다시 돌린 뒤** 올린다.
+
+<!-- 출처: BehaviorTree/BehaviorTree.CPP 릴리스 노트 4.9.0 · 4.11.0 (2026-11-08) · CHANGELOG.rst 4.11.1 (ea74003, 2026-11-12), 2026-11-21 확인 -->

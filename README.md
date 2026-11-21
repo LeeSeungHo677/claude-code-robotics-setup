@@ -60,7 +60,7 @@ cd claude-code-robotics-setup
 | **CLAUDE.md** | 항상 지켜야 하는 규칙 (반론 제기, 실기/시뮬 구분, 계층별 진단 순서 …) | 매 세션 |
 
 로봇 쪽에서 특히 손이 많이 간 스킬:
-`ros2-engineering`(라우터 + references 25편, 약 16,800줄) · `nav2` · `robot-calibration` · `robot-kinematics` ·
+`ros2-engineering`(라우터 + references 29편, 약 18,600줄) · `nav2` · `robot-calibration` · `robot-kinematics` ·
 `motion-planning` · `manipulation-control` · `slam-algorithms` · `state-estimation` ·
 `imitation-learning` · `legged-rl` · `vla-vlm-robotics` · `robot-safety-compliance` ·
 `multi-robot-fleet` · `robot-networking` · `fieldbus-comm` · `incident-analysis`

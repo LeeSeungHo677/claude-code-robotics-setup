@@ -491,26 +491,40 @@ The daemon runs as a background process. It connects to the DDS network independ
 
 ## 7. Security (SROS2)
 
-For production deployments, enable DDS security via SROS2. This provides mutual TLS authentication,
-topic-level access control, and message encryption. See `references/security.md` for the complete
-SROS2 workflow including keystore setup, governance/permissions authoring, certificate management,
-supply chain hardening, and performance impact analysis.
+For production deployments, enable DDS security via SROS2. It configures
+DDS:Auth:PKI-DH participant authentication, DDS access control, and message
+protection. See `references/security.md` for enclave boundaries, keystore setup,
+governance/permissions authoring, certificate management, supply chain hardening,
+and target-path performance measurement.
 
-Quick start for testing:
+Initialization smoke test in an isolated, non-actuating environment:
 
 ```bash
 ros2 security create_keystore ~/sros2_keystore
 ros2 security create_enclave ~/sros2_keystore /my_robot/driver
 export ROS_SECURITY_KEYSTORE=~/sros2_keystore
 export ROS_SECURITY_ENABLE=true
-export ROS_SECURITY_STRATEGY=Permissive  # Use Enforce in production
+export ROS_SECURITY_STRATEGY=Enforce
 ```
+
+The default enclave has broad permissions. Replace them with the intended policy
+and test both allowed and denied operations before treating this as an
+authorization test. `Permissive` may fall back to unsecured operation when
+security initialization fails; it is not an access-control test mode.
 
 ## 8. Monitoring and health checks
 
 ### Health check endpoint pattern
 
+This is an illustrative node pattern, not a standalone tested program.
+The example below uses concrete message types and defines the timestamp update
+path.
+
 ```python
+from rclpy.node import Node
+from sensor_msgs.msg import JointState, LaserScan
+from std_srvs.srv import Trigger
+
 class HealthMonitor(Node):
     def __init__(self):
         super().__init__('health_monitor')
@@ -520,10 +534,17 @@ class HealthMonitor(Node):
             '/joint_states': {'timeout': 1.0, 'last_seen': None},
             '/scan': {'timeout': 2.0, 'last_seen': None},
         }
-        for topic in self.monitored_topics:
+        self.topic_subscriptions = [
             self.create_subscription(
-                AnyMsg, topic,
-                lambda msg, t=topic: self._update(t), 10)
+                JointState, '/joint_states',
+                lambda _: self._update('/joint_states'), 10),
+            self.create_subscription(
+                LaserScan, '/scan',
+                lambda _: self._update('/scan'), 10),
+        ]
+
+    def _update(self, topic):
+        self.monitored_topics[topic]['last_seen'] = self.get_clock().now()
 
     def health_callback(self, request, response):
         now = self.get_clock().now()
@@ -595,21 +616,41 @@ def generate_launch_description():
 
 ### Hardware safety on shutdown
 
-For lifecycle nodes that control hardware, the `on_deactivate` callback must:
+For lifecycle nodes that control hardware, `on_deactivate` should:
 
-1. Send a safe command (zero velocity, disable torque, close gripper to safe position)
-2. Wait for acknowledgement from hardware (with timeout)
-3. Close communication channels
+1. Send a protocol-specific safe command, such as zero velocity or torque disable.
+2. If the device provides an acknowledgement, validate that response with a
+   bounded timeout. A fixed sleep is not an acknowledgement.
+3. If acknowledgement fails, escalate through the driver's documented fault path
+   or independent stop mechanism; do not claim that the actuator stopped.
+4. Close communication channels only after the safe-command outcome has been
+   handled according to the device's safety policy.
+
+If the device cannot acknowledge the stop command, rely on a documented
+hardware watchdog or independent stop path and do not present elapsed time as
+proof that the actuator stopped.
+
+The following is a protocol-specific sketch, not a drop-in implementation.
+`send_zero_velocity_and_wait_for_ack()` must send the command and parse the
+actual device response within the supplied timeout. The failure branch represents
+where the driver-specific fault/escalation policy must take over.
 
 ```cpp
+using namespace std::chrono_literals;
+
 CallbackReturn on_deactivate(const rclcpp_lifecycle::State &) override {
-  // 1. Safe the hardware BEFORE closing the connection
-  if (serial_.is_open()) {
-    send_zero_velocity(serial_);
-    // 2. Brief wait for hardware to acknowledge
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  if (!serial_.is_open()) {
+    return CallbackReturn::SUCCESS;
   }
-  // 3. Close
+
+  const bool stopped =
+    send_zero_velocity_and_wait_for_ack(serial_, 100ms);
+  if (!stopped) {
+    RCLCPP_ERROR(get_logger(), "Stop acknowledgement timed out");
+    // Escalate through the driver's fault/independent-stop policy here.
+    return CallbackReturn::FAILURE;
+  }
+
   serial_.close();
   return CallbackReturn::SUCCESS;
 }
