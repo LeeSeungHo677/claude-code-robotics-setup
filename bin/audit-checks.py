@@ -4,12 +4,15 @@
   1. 정책 ↔ 강제 일치   CLAUDE.md 가 "실행하지 않는다" 고 한 하드웨어 명령이
                          실제로 settings ask/deny 나 dangerous-command-guard 에 걸리는가, allow 에 섞이지 않았는가
   2. 고정 컨텍스트 크기  CLAUDE.md · 스킬/에이전트 description · MEMORY.md — 매 세션 내는 비용
-  3. 안 쓰는 스킬        ~/.claude.json skillUsage 기준
+  3. 안 쓰는 스킬        ~/.claude.json skillUsage 기준. 꺼진 스킬(skillOverrides off/user-invocable-only)과
+                         수동 전용(disable-model-invocation)은 따로 센다 — 안 쓰는 게 당연하다
   4. 우리 것이 아닌 훅   ~/.claude/hooks 밖을 가리키는 훅과, 그 스크립트의 네트워크 호출
   5. 훅 fail-open 기록   ~/.claude/logs/hook-errors.log (최근 30일)
   6. 낡은 메모리         project/reference 유형인데 90일 넘게 갱신 안 된 것
   7. 배포판 drift        공개 배포판(dist-sync.json 의 dist)과 bin/hooks/commands/agents/skills 를 비교.
                          의도적 차이는 dist-sync.json 의 intentional 에 적어야 경고가 안 뜬다. 설정 파일이 없으면 건너뜀
+  8. 꺼진 스킬 참조      켜진 에이전트·커맨드·스킬·CLAUDE.md 가 꺼진 스킬을 이름으로 부르는 곳.
+                         `~/.claude/skills/<name>/SKILL.md` 경로로 쓴 것(필요하면 Read)은 통과
 
 자동으로 고치지 않는다. 보고만 한다.   실행: python3 ~/.claude/bin/audit-checks.py
 """
@@ -98,15 +101,60 @@ def check_budget():
     return out
 
 
-def check_unused():
+def skill_states(root=C, settings=None):
+    """(모든 스킬, 꺼진 것, 수동 전용) — 꺼짐 = skillOverrides off/user-invocable-only."""
+    if settings is None:
+        try:
+            settings = json.load(open(os.path.join(root, "settings.json"), encoding="utf-8"))
+        except Exception:
+            settings = {}
+    so = settings.get("skillOverrides") or {}
+    mine = sorted(os.path.basename(os.path.dirname(p)) for p in glob.glob(os.path.join(root, "skills", "*", "SKILL.md")))
+    off = {s for s in mine if so.get(s) in ("off", "user-invocable-only")}
+    manual = {s for s in mine if s not in off and frontmatter(os.path.join(root, "skills", s, "SKILL.md")).get("disable-model-invocation") is True}
+    return mine, off, manual
+
+
+def check_unused(root=C, settings=None, claude_json=os.path.expanduser("~/.claude.json")):
     try:
-        su = json.load(open(os.path.expanduser("~/.claude.json"), encoding="utf-8")).get("skillUsage") or {}
+        su = json.load(open(claude_json, encoding="utf-8")).get("skillUsage") or {}
     except Exception:
         return ["- skillUsage 를 읽지 못함"]
-    mine = sorted(os.path.basename(os.path.dirname(p)) for p in glob.glob(os.path.join(C, "skills", "*", "SKILL.md")))
-    unused = [s for s in mine if (su.get(s) or {}).get("usageCount", 0) == 0]
-    return [f"- 사용 기록 0회: {len(unused)}/{len(mine)}개 — description 이 실제 요청 단어와 안 맞을 수 있다",
-            "  " + ", ".join(f"`{s}`" for s in unused)]
+    mine, off, manual = skill_states(root, settings)
+    zero = {s for s in mine if (su.get(s) or {}).get("usageCount", 0) == 0}
+    on = [s for s in mine if s not in off and s not in manual]
+    unused = sorted(zero & set(on))
+    return [f"- 켜진 스킬 중 사용 기록 0회: {len(unused)}/{len(on)}개 — description 이 실제 요청 단어와 안 맞을 수 있다",
+            "  " + ", ".join(f"`{s}`" for s in unused),
+            f"- 꺼진 스킬 {len(off)}개 (사용 0회 {len(zero & off)}) · 수동 전용 {len(manual)}개 (사용 0회 {len(zero & manual)}) — 따로 센다"]
+
+
+def check_off_refs(root=C, settings=None):
+    """켜진 파일이 꺼진 스킬을 이름으로 부르는 곳. 모델은 그 스킬을 열 수 없으니 막다른 안내가 된다."""
+    mine, off, manual = skill_states(root, settings)
+    if not off:
+        return ["- 꺼진 스킬 없음"]
+    files = glob.glob(os.path.join(root, "agents", "*.md")) + glob.glob(os.path.join(root, "commands", "**", "*.md"), recursive=True)
+    if os.path.isfile(os.path.join(root, "CLAUDE.md")):
+        files.append(os.path.join(root, "CLAUDE.md"))
+    for s in mine:
+        if s not in off and s not in manual:
+            files += glob.glob(os.path.join(root, "skills", s, "**", "*.md"), recursive=True)
+    names = "|".join(re.escape(n) for n in sorted(off, key=len, reverse=True))
+    # `name` (백틱) 또는 "name 스킬". 경로(`~/.claude/skills/name/…`)·더 긴 이름의 일부는 제외
+    rx = re.compile(rf"`({names})`|(?<![\w/`-])({names})\s*스킬")
+    hits = []
+    for f in sorted(files):
+        try:
+            lines = open(f, encoding="utf-8").read().splitlines()
+        except OSError:
+            continue
+        for i, line in enumerate(lines, 1):
+            for m in rx.finditer(line):
+                hits.append(f"  ✗ `{os.path.relpath(f, root)}:{i}` → `{m.group(1) or m.group(2)}`")
+    if not hits:
+        return ["- 없음 (꺼진 스킬은 경로 + '필요하면 Read' 로만 가리킨다)"]
+    return [f"- ✗ {len(hits)}곳 — 스킬을 다시 켜지 말고 `~/.claude/skills/<name>/SKILL.md`(꺼진 스킬 — 필요하면 Read) 로 바꾼다"] + hits
 
 
 def check_foreign_hooks(settings):
@@ -251,11 +299,12 @@ def main():
     sections = [
         ("1. 정책 ↔ 강제 일치 (하드웨어 명령)", check_policy(settings)),
         ("2. 고정 컨텍스트 크기", check_budget()),
-        ("3. 안 쓰는 스킬", check_unused()),
+        ("3. 안 쓰는 스킬", check_unused(settings=settings)),
         ("4. 우리 것이 아닌 훅", check_foreign_hooks(settings)),
         ("5. 훅 fail-open 기록", check_hook_errors()),
         ("6. 낡은 메모리", check_memory()),
         ("7. 배포판 drift", check_dist_drift()),
+        ("8. 꺼진 스킬 참조", check_off_refs(settings=settings)),
     ]
     for title, lines in sections:
         print(f"### {title}")

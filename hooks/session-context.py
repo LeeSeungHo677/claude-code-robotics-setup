@@ -27,6 +27,45 @@ import unicodedata
 HOME = os.path.expanduser("~")
 USER_SKILLS = os.path.join(HOME, ".claude", "skills")
 CLAUDE_JSON = os.path.join(HOME, ".claude.json")
+SETTINGS = os.path.join(HOME, ".claude", "settings.json")
+
+# 모델이 스스로 열 수 없는 스킬은 권하지 않는다 (2026-11-21).
+#   - settings.json `skillOverrides` 가 "off"(아예 숨김) 또는 "user-invocable-only"(/이름만)
+#   - SKILL.md 프론트매터 `disable-model-invocation: true` (수동 호출 전용)
+# 전에는 디렉토리만 있으면 권해서, /doctor 로 꺼 둔 paper-review·python-pro 등을 매 세션 광고했다.
+_HIDDEN = None
+_DMI = re.compile(r"(?m)^disable-model-invocation:\s*true\b")
+
+
+def _hidden_skills(cwd=None):
+    global _HIDDEN
+    if _HIDDEN is None:
+        hidden = set()
+        paths = [SETTINGS]
+        if cwd:
+            paths += [os.path.join(cwd, ".claude", n) for n in ("settings.json", "settings.local.json")]
+        for path in paths:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    so = json.load(f).get("skillOverrides") or {}
+                hidden |= {k for k, v in so.items() if v in ("off", "user-invocable-only")}
+            except Exception:
+                continue
+        _HIDDEN = hidden
+    return _HIDDEN
+
+
+def _skill_available(name, cwd=None):
+    """모델이 열 수 있는 사용자 스킬인가 — 디렉토리 존재 + 위 두 조건에 안 걸림."""
+    if name in _hidden_skills(cwd):
+        return False
+    for d in ((os.path.join(cwd, ".claude", "skills"),) if cwd else ()) + (USER_SKILLS,):
+        p = os.path.join(d, name, "SKILL.md")
+        if os.path.isfile(p):
+            head = _head(p, 4000)
+            end = head.find("\n---", 3)
+            return not _DMI.search(head[:end] if end > 0 else head)
+    return False
 
 def _count(path, pat=None):
     try:
@@ -127,6 +166,7 @@ def _unrail(s):
 # (예전에 없는 `ros2-setup` 을 매 세션 광고하고 있었다).
 SAY_EXAMPLES = [
     ('"논문 제대로 리뷰해줘"', "paper-review"),
+    ('"디자인이 AI 티 난다"', "design-system"),
     ('"시뮬과 실기가 다른데"', "sim-to-real-check"),
     ('"QoS 가 안 맞아"', "ros2-engineering"),
     ('"보상함수 설계"', "rl-training"),
@@ -194,8 +234,9 @@ def banner(f):
     # 예시는 한 줄에 하나씩, 화살표를 세로로 맞춘다 — 붙여 쓰면 어느 말이 어느
     # 스킬을 여는지 눈으로 짚기 어렵다.
     body = []
-    cw = max(_w(say) for say, _ in SAY_EXAMPLES) + 2
-    for i, (say, sk) in enumerate(SAY_EXAMPLES):
+    says = [(say, sk) for say, sk in SAY_EXAMPLES if _skill_available(sk, f.get("cwd"))][:5]
+    cw = max((_w(say) for say, _ in says), default=0) + 2
+    for i, (say, sk) in enumerate(says):
         body.append(_row("스킬" if i == 0 else "", _pad(say, cw) + _dim("→ ") + _cyan(sk)))
     body += _wrap("에이전트", [f"{_cyan(n)} {_dim(why)}" for n, why in CALL_AGENTS])
     body += _wrap("커맨드", [f"{_cyan(n)} {_dim(why)}" for n, why in CALL_CMDS])
@@ -342,7 +383,7 @@ def _exists(kind, name, cwd):
         if kind == "agent" and os.path.exists(p + ".md"):
             return True
         if kind == "skill" and os.path.isdir(p):
-            return True
+            return _skill_available(name, cwd)
     return False
 
 
@@ -408,7 +449,7 @@ def domain_skills(cwd, top=3):
         skills = {}
         for d in os.listdir(USER_SKILLS):
             p = os.path.join(USER_SKILLS, d, "SKILL.md")
-            if not os.path.isfile(p):
+            if not os.path.isfile(p) or not _skill_available(d, cwd):
                 continue
             t = _head(p, 600)
             i = t.find("description:")
@@ -447,7 +488,7 @@ def rotation_skill(stack):
     'authentication-patterns' 를 권하면 다음부터 안 읽는다."""
     try:
         names = sorted(d for d in os.listdir(USER_SKILLS)
-                       if os.path.isfile(os.path.join(USER_SKILLS, d, "SKILL.md")))
+                       if os.path.isfile(os.path.join(USER_SKILLS, d, "SKILL.md")) and _skill_available(d))
         try:
             with open(CLAUDE_JSON, encoding="utf-8") as f:
                 su = json.load(f).get("skillUsage") or {}
@@ -548,6 +589,7 @@ def main():
         sys.exit(0)
 
     stack = detect_stack(cwd)
+    _hidden_skills(cwd)          # 프로젝트 settings 의 skillOverrides 까지 먼저 읽어 둔다 (캐시)
     reco = recommend(cwd, stack)
     dom = domain_skills(cwd)
     rot = rotation_skill(stack)
@@ -579,6 +621,7 @@ def main():
     facts = {
         "ncron": ncron,
         "rea": rea,
+        "cwd": cwd,
         "repo": os.path.basename(cwd.rstrip("/")) or cwd,
         "stack": stack, "branch": branch, "dirty": dirty, "last": last,
         "ros": ros, "reco": reco, "dom": dom,

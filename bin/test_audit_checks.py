@@ -120,6 +120,35 @@ def main():
     check("audit-checks.py exit 0", r.returncode == 0, r.stderr[-300:])
     check("'### 7. 배포판 drift' 헤더", "### 7. 배포판 drift" in r.stdout, r.stdout[-300:])
 
+    check("'### 8. 꺼진 스킬 참조' 헤더", "### 8. 꺼진 스킬 참조" in r.stdout, r.stdout[-300:])
+
+    # 9) 3단계 꺼진/수동 분리 + 8단계 꺼진 스킬 참조 (2026-11-21)
+    with tempfile.TemporaryDirectory() as root:
+        fm = lambda extra="": f"---\nname: x\ndescription: d\n{extra}---\n"
+        w(root, "skills/on-a/SKILL.md", fm() + "본문. 자세한 건 `off-b` 스킬.\n그리고 off-b 스킬과 함께.\n"
+          "경로는 `~/.claude/skills/off-b/SKILL.md`(꺼진 스킬 — 필요하면 Read).\n`off-bb` 는 다른 이름.\n")
+        w(root, "skills/off-b/SKILL.md", fm() + "`on-a` 를 본다 — 꺼진 파일 안의 참조는 세지 않는다\n")
+        w(root, "skills/off-bb/SKILL.md", fm())
+        w(root, "skills/uio-d/SKILL.md", fm())
+        w(root, "skills/man-c/SKILL.md", fm("disable-model-invocation: true\n") + "`off-b` — 수동 스킬 안도 세지 않는다\n")
+        w(root, "agents/ag.md", fm() + "세부는 `uio-d` 스킬.\n")
+        w(root, "commands/x/y.md", "`off-b`\n")
+        st = {"skillOverrides": {"off-b": "off", "uio-d": "user-invocable-only"}}
+        mine, off, manual = ac.skill_states(root, st)
+        check("skill_states — 꺼짐(off·user-invocable-only)·수동 구분", off == {"off-b", "uio-d"} and manual == {"man-c"},
+              (off, manual))
+        out = ac.check_off_refs(root, st)
+        hits = [l for l in out if l.startswith("  ✗")]
+        locs = sorted(l.split("`")[1] for l in hits)
+        check("꺼진 스킬 참조 — 백틱·'X 스킬' 둘 다 잡고, 경로 표기·다른 이름·꺼진/수동 파일 안은 무시",
+              locs == ["agents/ag.md:5", "commands/x/y.md:1", "skills/on-a/SKILL.md:5", "skills/on-a/SKILL.md:6"], out)
+        cj = os.path.join(root, "claude.json")
+        json.dump({"skillUsage": {"on-a": {"usageCount": 0}, "off-b": {"usageCount": 0}}}, open(cj, "w"))
+        out = ac.check_unused(root, st, cj)
+        check("안 쓰는 스킬 — 켜진 것만 0회 목록, 꺼진·수동은 따로", "2/2개" in out[0] and out[1].strip() == "`off-bb`, `on-a`"
+              and "`off-b`" not in out[1] and "꺼진 스킬 3개" not in out[2] and "꺼진 스킬 2개" in out[2]
+              and "수동 전용 1개" in out[2], out)
+
     print(f"\n실패 {len(fails)}건" + (f": {fails}" if fails else " — 전부 통과"))
     sys.exit(1 if fails else 0)
 

@@ -237,6 +237,41 @@ def main():
     check("REA 줄 폭 ≤ 배너 폭", not over, str(over))
     shutil.rmtree(h, ignore_errors=True); shutil.rmtree(other, ignore_errors=True)
 
+    # 11) 꺼진 스킬·수동 전용 스킬은 권하지 않는다 (2026-11-21)
+    #     settings.json skillOverrides off / user-invocable-only, SKILL.md disable-model-invocation: true
+    h = tempfile.mkdtemp()
+    def skill(name, extra=""):
+        os.makedirs(os.path.join(h, ".claude", "skills", name), exist_ok=True)
+        with open(os.path.join(h, ".claude", "skills", name, "SKILL.md"), "w", encoding="utf-8") as f:
+            word = " quokkadesign" if extra or name == "uio-skill" else ""   # README 와만 겹치는 단어 → 도메인 매칭 후보
+            f.write(f"---\nname: {name}\ndescription: docker container python pytest asyncio {name}{word}\n{extra}---\nbody\n")
+    for n in ("paper-review", "repo-review", "design-system", "python-pro", "docker-ros2-development",
+              "manual-only", "uio-skill"):
+        skill(n, "disable-model-invocation: true\n" if n == "manual-only" else "")
+    with open(os.path.join(h, ".claude", "settings.json"), "w") as f:
+        json.dump({"skillOverrides": {"paper-review": "off", "python-pro": "off",
+                                      "uio-skill": "user-invocable-only"}}, f)
+    proj = mk(tempfile.mkdtemp(), "pyproject.toml", "Dockerfile")
+    with open(os.path.join(proj, "README.md"), "w") as f:
+        f.write("# quokkadesign\nquokkadesign tooling repository with several unrelated words here\n")
+    out, _ = emit(proj, {"HOME": h})
+    sm = ANSI.sub("", (out or {}).get("systemMessage", ""))
+    ctx = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
+    check("off 스킬은 '부르는 법' 예시에서 빠진다", "paper-review" not in sm and "repo-review" in sm, sm[-600:])
+    check("off 스킬은 스택 추천에서 빠지고 켜진 것은 남는다",
+          "python-pro" not in sm + ctx and "docker-ros2-development" in sm + ctx, (sm + ctx)[-400:])
+    check("수동 전용·user-invocable-only 스킬은 어디에도 권하지 않는다",
+          "manual-only" not in sm + ctx and "uio-skill" not in sm + ctx, (sm + ctx)[-400:])
+    # 프로젝트 settings 의 off 도 따른다
+    os.makedirs(os.path.join(proj, ".claude"), exist_ok=True)
+    with open(os.path.join(proj, ".claude", "settings.local.json"), "w") as f:
+        json.dump({"skillOverrides": {"docker-ros2-development": "off"}}, f)
+    out, _ = emit(proj, {"HOME": h})
+    sm = ANSI.sub("", (out or {}).get("systemMessage", ""))
+    ctx = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
+    check("프로젝트 settings.local.json 의 off 도 반영", "docker-ros2-development" not in sm + ctx, (sm + ctx)[-400:])
+    shutil.rmtree(h, ignore_errors=True); shutil.rmtree(proj, ignore_errors=True)
+
     print(f"\n{7 + 2 - len(fails)}/{7 + 2} 통과" if False else
           f"\n실패 {len(fails)}건" + (f": {fails}" if fails else " — 전부 통과"))
     sys.exit(1 if fails else 0)
