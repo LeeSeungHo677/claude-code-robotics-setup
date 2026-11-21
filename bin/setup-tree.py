@@ -178,6 +178,7 @@ HOOK_WHAT = {
     "version-watch": "Claude Code 새 버전 알림",
     "tool-run-log": "도구 실행 기록 · 같은 명령 3회 연속이면 경고",
     "untrusted-content-flag": "외부에서 가져온 내용 속 지시문 표시",
+    "lint-on-edit": "편집한 .py 에 ruff 결과 첨부 (.claude/lint-on-edit 있는 프로젝트만)",
 }
 
 

@@ -94,9 +94,9 @@ PRESETS = {
         "sub": QoSProfile(Reliability.BEST_EFFORT, Durability.VOLATILE, History.KEEP_LAST, 5, "Sensor Subscriber"),
     },
     "command": {
-        # Matches SKILL.md Principle 6 "Command velocity" row: deadline 100 ms,
-        # lifespan 200 ms. Catches stale commands so the executor side does not
-        # act on an outdated velocity if the publisher hangs.
+        # Matches references/engineering-principles.md Principle 6 "Command velocity"
+        # row: deadline 100 ms, lifespan 200 ms. Catches stale commands so the
+        # executor side does not act on an outdated velocity if the publisher hangs.
         "pub": QoSProfile(Reliability.RELIABLE, Durability.VOLATILE, History.KEEP_LAST, 1,
                           "Command Publisher",
                           deadline_ms=100, lifespan_ms=200),
@@ -287,6 +287,14 @@ def check_compatibility(pub: QoSProfile, sub: QoSProfile) -> CompatibilityResult
         suggestions.append(
             "Fix: Change the publisher to TRANSIENT_LOCAL (it will retain the "
             "last message for late subscribers), or change the subscriber to VOLATILE."
+        )
+
+    if pub.durability == Durability.TRANSIENT_LOCAL and sub.durability == Durability.VOLATILE:
+        warnings.append(
+            "Publisher is TRANSIENT_LOCAL but subscriber is VOLATILE. The connection "
+            "is made, but a late-joining subscriber receives no retained history: "
+            "if it needs the last sample (a map, static TF, a latched plan), request "
+            "TRANSIENT_LOCAL on the subscriber."
         )
 
     # History / depth warnings

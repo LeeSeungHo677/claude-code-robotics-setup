@@ -8,7 +8,8 @@ diverge constantly — an old `install/` prefix, a second overlay on the
 nobody remembers starting.
 
 Every check here is read-only and runs at verification level **L3–L4**
-(`SKILL.md` Principle 13): it observes a live system, it does not move a robot.
+(`references/engineering-principles.md` Principle 13): it observes a live system,
+it does not move a robot.
 
 ## Table of contents
 
@@ -55,13 +56,17 @@ package right now — which is what a command you launch *from here* will get.
 For a claim about a running node, read that process:
 
 ```bash
-pid=$(pgrep -f controller_server | head -1)
+# '[c]ontroller_server' matches the process but not this shell: a plain
+# `pgrep -f controller_server` run through `bash -c` or ssh returns the
+# wrapper's own PID, so a stopped stack looks alive and exit 0 proves nothing.
+pid=$(pgrep -f '[c]ontroller_server' | head -1)
+[ -n "$pid" ] && tr '\0' ' ' < /proc/$pid/cmdline | grep -q controller_server || echo "not running"
 
 tr '\0' ' ' < /proc/$pid/cmdline     # how it was actually invoked (args, remaps, params-file)
 readlink /proc/$pid/exe              # the executing binary
 readlink /proc/$pid/cwd              # working directory — relative paths resolve here
 tr '\0' '\n' < /proc/$pid/environ |
-  grep -E 'AMENT_PREFIX_PATH|COLCON_PREFIX_PATH|PYTHONPATH|LD_LIBRARY_PATH|ROS_DISTRO|ROS_DOMAIN_ID|RMW_IMPLEMENTATION'
+  grep -E 'AMENT_PREFIX_PATH|COLCON_PREFIX_PATH|PYTHONPATH|LD_LIBRARY_PATH|ROS_DISTRO|ROS_DOMAIN_ID|RMW_IMPLEMENTATION|CYCLONEDDS_URI|FASTRTPS_DEFAULT_PROFILES_FILE'
 
 ls -l /proc/$pid/fd | grep -v socket  # config/log/device files it holds open
 ```
@@ -143,14 +148,56 @@ done
 ```
 
 The fix is to delete `build/`, `install/`, and `log/` for that package and
-rebuild — and the same reasoning is why `SKILL.md` Principle 10 restricts
-caching those directories in CI.
+rebuild — and the same reasoning is why
+`references/engineering-principles.md` Principle 10 restricts caching those
+directories in CI.
 
 The same diff applies to Python modules, with the §1 caveat attached:
 `get_package_share_directory()` and a module's `__file__` resolve through the
 ament index and `PYTHONPATH` **of whichever interpreter runs them**. Run them
 inside the node's environment — otherwise you are comparing your shell's
 resolution against the source tree and learning nothing about the node.
+
+**Deployment chronology.** A commit, a build artifact, a deployment event, and
+the bytes now installed on the target are four different claims. A hash or
+"deployed" line in an earlier report describes that earlier moment; it is not
+evidence about the current installation. A commit that changed only tests does
+not establish that runtime node or config bytes changed, and a commit alone does
+not establish that any artifact was deployed. After any deployment, re-read the
+installed files on the target and record their current hashes instead of
+reusing the report.
+
+**Copying a symlinked install tree.** `cp -r` copies symbolic links as links,
+so a "copy" of an install space that was linked into place still points at the
+deployed sources, and editing the copy edits the deployment. Before copying,
+resolve every link and refuse the copy if any link leaves the tree or does not
+resolve. Compare whole path components: a prefix test such as
+`grep -v " -> $share"` accepts `/opt/share-outside/key` as inside `/opt/share`.
+Only then copy with `-L` so the result is self-contained, and check that no link
+survived:
+
+```bash
+# copy_tree_self_contained <tree> <dest>: copies nothing when a link leaves
+# <tree> or dangles. A link cycle makes cp itself fail.
+copy_tree_self_contained() {
+  root=$(readlink -f -- "$1") && [ -d "$root" ] || { echo "not a directory: $1"; return 1; }
+  [ ! -e "$2" ] || { echo "destination exists: $2"; return 1; }
+  escaping=$(find "$root" -type l -exec sh -c '
+    root=$1; shift
+    for link; do
+      target=$(readlink -f -- "$link") && [ -e "$target" ] || { printf "%s -> (unresolved)\n" "$link"; continue; }
+      case $target in "$root"|"$root"/*) ;; *) printf "%s -> %s\n" "$link" "$target" ;; esac
+    done' sh "$root" {} +) || { echo "cannot list links under $root"; return 1; }
+  if [ -n "$escaping" ]; then
+    printf '%s\n' "$escaping"
+    echo "links leave the tree or dangle: copy the needed files explicitly"
+    return 1
+  fi
+  cp -rL -- "$root" "$2" || return 1
+  if [ -n "$(find "$2" -type l)" ]; then echo "symlinks remain in $2"; return 1; fi
+}
+copy_tree_self_contained "$share" /tmp/share_copy
+```
 
 ## 5. Which parameters are actually in effect?
 
@@ -293,7 +340,7 @@ restarted (`references/deployment.md` §"ROS 2 daemon").
 Then confirm against the operating system, which does not cache:
 
 ```bash
-pgrep -af 'ros2|controller_server|robot_state_publisher'
+pgrep -af '[r]os2|[c]ontroller_server|[r]obot_state_publisher'   # bracket: never match this shell
 ps -eo pid,ppid,etime,cmd | grep -i my_robot | grep -v grep
 systemctl status my-robot-bringup.service      # if launched by systemd
 ```
@@ -324,6 +371,7 @@ conclusions come from.
 | 8 | Which endpoints publish `/tf`? | `ros2 topic info /tf -v` + written ownership map | which endpoint sent a *specific* edge (§7), or that the data is fresh |
 | 9 | Is the graph view current? | `--no-daemon`, `ros2 daemon stop/start` | that only one process backs each node name |
 | 10 | Which processes are really alive? | `pgrep -af`, `systemctl status` | that they are all the ones you launched |
+| 11 | What is installed on the target right now? | `sha256sum` on the target's install space (§4) | that the last report or commit describes it |
 
 Limits that apply to the whole checklist, not to single rows:
 
@@ -339,9 +387,10 @@ Limits that apply to the whole checklist, not to single rows:
   contention that appears for 200 ms during a reconnect will not show up in a
   single `ros2 topic info -v`. Sample repeatedly, or monitor graph events.
 
-Cite the level with the result (`SKILL.md` Principle 13): this checklist reaches
-**L3** with the robot disconnected, **L4** with hardware powered and actuation
-isolated. It never reaches L5 — nothing here commands motion.
+Cite the level with the result (`references/engineering-principles.md` Principle
+13): this checklist reaches **L3** with the robot disconnected, **L4** with
+hardware powered and actuation isolated. It never reaches L5 — nothing here
+commands motion.
 
 ## 10. Common failures and fixes
 

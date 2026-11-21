@@ -18,6 +18,13 @@ must not make every Stop fail forever in a repo the skill never modified.
 Outside a git repository (or if git is unavailable) all discovered files
 are validated, as before.
 
+A launch-named file is validated only where ROS context is confirmed for
+that file: a valid ROS package manifest in its directory or above it, or a
+launch import or entry point in its own text. `deploy.launch.py` in a web
+project is not a ROS launch file, and a ROS package elsewhere in the same
+repository does not make it one. Naming the workspace explicitly with
+SKILL_WORKSPACE validates every launch-named file, as a manual run expects.
+
 Execution logging is opt-in: a summary line is appended to .skill-runs.log
 only when the SKILL_RUNS_LOG environment variable is set (see
 _resolve_log_path). Without the opt-in the hook never writes to the
@@ -37,9 +44,13 @@ Exit codes:
 
 import json
 import os
+import re
 import subprocess
 import sys
 import ast
+import importlib.util
+import xml.etree.ElementTree as ET
+from pathlib import Path
 
 
 # Maximum directory depth to walk (relative to workspace root).
@@ -74,6 +85,11 @@ try:
     _HAVE_YAML = True
 except ImportError:
     _HAVE_YAML = False
+
+# Nav2 parameter files are kilobytes. Anything larger is not parsed at Stop:
+# PyYAML's pure-Python loader needs about 12 s for a 9 MB recorded point list,
+# which is the whole Stop budget, at every turn end.
+_MAX_YAML_BYTES = 1024 * 1024
 
 # Top-level keys that mark a YAML file as a Nav2 parameter file.
 _NAV2_KEY_HINTS = frozenset((
@@ -233,65 +249,229 @@ def _module_symbols(body, symbols=None):
             _module_symbols(node.finalbody, symbols)
         elif isinstance(node, ast.With):
             _module_symbols(node.body, symbols)
+        elif isinstance(node, (ast.For, ast.While)):
+            # A loop body runs zero or more times and `else` runs only when
+            # the loop was not left by `break`, so neither is a certain
+            # binding. Over an empty literal (`for _ in []`) the body
+            # provably never runs and only `else` executes.
+            if _loop_never_runs(node):
+                _module_symbols(node.orelse, symbols)
+            else:
+                variants = [
+                    _module_symbols(node.orelse, dict(symbols)),              # zero iterations
+                    _module_symbols(node.body + node.orelse, dict(symbols)),  # ran, no break
+                    _module_symbols(node.body, dict(symbols)),                # ran, break
+                ]
+                symbols.clear()
+                symbols.update(_merge_symbols(variants))
 
     return symbols
 
 
-def _entry_point_state(body, wanted):
-    """What *wanted* is bound to once the module has finished executing."""
-    return _module_symbols(body).get(wanted, _MISSING)
+def _loop_never_runs(node):
+    """True for `for _ in []:` / `while False:` — a body that cannot run."""
+    if isinstance(node, ast.While):
+        return _is_falsy_literal(node.test)
+    it = node.iter
+    if isinstance(it, (ast.List, ast.Tuple, ast.Set)):
+        return not it.elts
+    if isinstance(it, ast.Dict):
+        return not it.keys
+    return isinstance(it, ast.Constant) and it.value in ('', b'')
+
+
+# Top-level packages whose import marks a module as launch code.
+_LAUNCH_PACKAGES = frozenset(('launch', 'launch_ros', 'launch_testing',
+                              'launch_xml', 'launch_yaml'))
+_LAUNCH_SOURCE_HINT = re.compile(
+    r'^\s*(?:from|import)\s+launch(?:_ros|_testing|_xml|_yaml)?\b'
+    r'|generate_launch_description', re.MULTILINE)
+
+
+def _imports_launch(tree):
+    """True when the module imports a launch package anywhere, functions included."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(alias.name.split('.')[0] in _LAUNCH_PACKAGES for alias in node.names):
+                return True
+        elif (isinstance(node, ast.ImportFrom) and not node.level and node.module
+              and node.module.split('.')[0] in _LAUNCH_PACKAGES):
+            return True
+    return False
+
+
+def _is_test_module(filepath):
+    """pytest-style module: `test_*.py`, or anything under test/ or tests/."""
+    path = Path(filepath)
+    return path.name.startswith('test_') or any(
+        part in ('test', 'tests') for part in path.parts[:-1])
+
+
+def _looks_like_launch_source(raw):
+    """Raw-text fallback for files the parser rejects."""
+    return bool(_LAUNCH_SOURCE_HINT.search(raw.decode('utf-8', errors='replace')))
+
+
+def _not_a_launch_description(filepath, tree, symbols):
+    """Name-matched files without an entry point that are provably something else.
+
+    * A launch_testing module exports generate_test_description instead.
+    * `_launch.py` is also an ordinary module name ending: a pytest
+      `test_integrated_http_launch.py`, a `fake_launch.py` that impersonates
+      the `ros2 launch` process for signal tests. Without an import of a
+      launch package such a file cannot build a LaunchDescription, and a
+      test module that merely imports `launch` is still a test. The
+      unambiguous `.launch.py` convention stays strict.
+
+    A `_launch.py` launch file that neither imports launch code nor binds
+    the entry point is missed here; `ros2 launch` would fail on it too, and
+    naming it `.launch.py` restores the strict check.
+    """
+    if symbols.get('generate_test_description', _MISSING) != _MISSING:
+        return True
+    if filepath.endswith('.launch.py'):
+        return False
+    return _is_test_module(filepath) or not _imports_launch(tree)
+
+
+# Same rule as skill_validate_hook.py; the two scripts stay importable on
+# their own, and tests/test_hook_ros_context.py holds them to one answer.
+_MANIFEST_MAX_BYTES = 256 * 1024
+_ANCESTOR_LIMIT = 8
+
+
+def _is_ros_package_manifest(path):
+    """True for a package.xml that declares an ament build, not merely the name."""
+    try:
+        if not os.path.isfile(path) or os.path.getsize(path) > _MANIFEST_MAX_BYTES:
+            return False
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError, ValueError, LookupError):
+        return False
+    if root.tag != 'package':
+        return False
+    declared = [node.text for tag in ('buildtool_depend', 'build_type')
+                for node in root.iter(tag)]
+    return any(isinstance(text, str) and text.strip().startswith('ament_')
+               for text in declared)
+
+
+def _ros_package_above(path, stop_dir=''):
+    """True when the file sits in, or below, a valid ROS package directory.
+
+    The manifest is read from disk, not taken from the changed-file set: a
+    package.xml committed long ago still makes a new launch file beside it a
+    ROS launch file.
+    """
+    current = os.path.dirname(os.path.abspath(path))
+    stop = os.path.abspath(stop_dir) if stop_dir else ''
+    if stop:
+        try:
+            if os.path.commonpath([current, stop]) != stop:
+                stop = ''
+        except ValueError:  # different drives
+            stop = ''
+    for _ in range(_ANCESTOR_LIMIT):
+        if _is_ros_package_manifest(os.path.join(current, 'package.xml')):
+            return True
+        parent = os.path.dirname(current)
+        if current == stop or parent == current:
+            break
+        current = parent
+    return False
+
+
+def _workspace_is_explicit():
+    """SKILL_WORKSPACE names the workspace on purpose: a manual or test run."""
+    return bool(os.environ.get('SKILL_WORKSPACE'))
+
+
+def _launch_file_in_scope(filepath, workspace):
+    """Whether an automatic run should validate this launch-named file.
+
+    This only selects files. validate_launch_file_syntax() is unchanged and
+    stays strict for everything it is given.
+    """
+    if _ros_package_above(filepath, workspace):
+        return True
+    try:
+        with open(filepath, 'rb') as fh:
+            return _looks_like_launch_source(fh.read())
+    except OSError:
+        return False
 
 
 def validate_launch_file_syntax(filepath):
     """Check that a launch file is valid Python and has generate_launch_description."""
     issues = []
     entry = 'generate_launch_description'
+    strict = filepath.endswith('.launch.py')
     try:
-        with open(filepath, 'r', encoding='utf-8') as fh:
-            source = fh.read()
+        with open(filepath, 'rb') as fh:
+            raw = fh.read()
+    except OSError:
+        return issues  # File may have been removed during session
+    try:
+        # Decode as the launch loader's import does (PEP 263 coding line,
+        # strict UTF-8 otherwise). Undecodable source is a finding, not a
+        # UnicodeDecodeError that aborts the whole hook. A `_launch.py` the
+        # parser rejects is still judged by its text, so a launch file with
+        # a syntax error is reported rather than skipped.
+        source = importlib.util.decode_source(raw)
         tree = ast.parse(source, filename=filepath)
-        state = _entry_point_state(tree.body, entry)
-        if state == _ASYNC:
+    except UnicodeDecodeError as e:
+        if strict or _looks_like_launch_source(raw):
             issues.append({
                 'file': filepath,
                 'severity': 'error',
-                'message': (f'{entry} resolves to a coroutine function — the '
-                            f'launch loader calls it directly and would get a '
-                            f'coroutine, not a LaunchDescription'),
+                'message': f'Source cannot be decoded for import (encoding): {e}',
             })
-        elif state == _NON_CALLABLE:
-            issues.append({
-                'file': filepath,
-                'severity': 'error',
-                'message': (f'{entry} ends up bound to something that is not '
-                            f'callable — the launch loader calls whatever the '
-                            f'module exports under that name'),
-            })
-        elif state == _UNKNOWN:
-            # Only some execution paths bind it. Not provably broken, so a
-            # warning rather than an error: the hook must not fail a launch
-            # file whose guard is always true in practice.
-            issues.append({
-                'file': filepath,
-                'severity': 'warning',
-                'message': (f'{entry} is only bound on some execution paths '
-                            f'— the launch loader fails on any path that '
-                            f'leaves it unset'),
-            })
-        elif state != _SYNC:
-            issues.append({
-                'file': filepath,
-                'severity': 'error',
-                'message': 'Missing generate_launch_description function',
-            })
+        return issues
     except SyntaxError as e:
+        if strict or _looks_like_launch_source(raw):
+            issues.append({
+                'file': filepath,
+                'severity': 'error',
+                'message': f'Syntax error: {e}',
+            })
+        return issues
+    symbols = _module_symbols(tree.body)
+    state = symbols.get(entry, _MISSING)
+    if state == _MISSING and _not_a_launch_description(filepath, tree, symbols):
+        return issues
+    if state == _ASYNC:
         issues.append({
             'file': filepath,
             'severity': 'error',
-            'message': f'Syntax error: {e}',
+            'message': (f'{entry} resolves to a coroutine function — the '
+                        f'launch loader calls it directly and would get a '
+                        f'coroutine, not a LaunchDescription'),
         })
-    except OSError:
-        pass  # File may have been removed during session
+    elif state == _NON_CALLABLE:
+        issues.append({
+            'file': filepath,
+            'severity': 'error',
+            'message': (f'{entry} ends up bound to something that is not '
+                        f'callable — the launch loader calls whatever the '
+                        f'module exports under that name'),
+        })
+    elif state == _UNKNOWN:
+        # Only some execution paths bind it. Not provably broken, so a
+        # warning rather than an error: the hook must not fail a launch
+        # file whose guard is always true in practice.
+        issues.append({
+            'file': filepath,
+            'severity': 'warning',
+            'message': (f'{entry} is only bound on some execution paths '
+                        f'— the launch loader fails on any path that '
+                        f'leaves it unset'),
+        })
+    elif state != _SYNC:
+        issues.append({
+            'file': filepath,
+            'severity': 'error',
+            'message': 'Missing generate_launch_description function',
+        })
     return issues
 
 
@@ -414,13 +594,31 @@ def validate_nav2_yaml(filepath):
         return issues
     import yaml  # type: ignore[import-untyped]
 
+    nav2_path = 'nav2' in filepath.lower()
     try:
-        with open(filepath, 'r', encoding='utf-8') as fh:
-            docs = list(yaml.safe_load_all(fh))
+        with open(filepath, 'rb') as fh:
+            raw = fh.read(_MAX_YAML_BYTES + 1)
     except OSError:
         return issues
+    # Only a file that mentions a Nav2 marker can produce a finding below, so
+    # the pure-Python parse is skipped for everything else (map dumps,
+    # recorded point lists, calibration files) instead of repeating it at
+    # every Stop. Decoding with replacement keeps a non-UTF-8 file from
+    # raising here; PyYAML reports its own encoding errors as YAMLError.
+    text = raw.decode('utf-8', errors='replace')
+    if not nav2_path and 'nav2_' not in text and not any(
+            hint in text for hint in _NAV2_KEY_HINTS):
+        return issues
+    if len(raw) > _MAX_YAML_BYTES:
+        return [{
+            'file': filepath,
+            'severity': 'skipped',
+            'message': f'larger than {_MAX_YAML_BYTES} bytes; not parsed',
+        }]
+    try:
+        docs = list(yaml.safe_load_all(raw))
     except yaml.YAMLError as e:
-        if 'nav2' in filepath.lower():
+        if nav2_path:
             issues.append({
                 'file': filepath,
                 'severity': 'error',
@@ -535,16 +733,27 @@ def _resolve_workspace():
 
 
 def _git_touched_paths(workspace):
-    """Return real paths of git-modified/untracked files, or None.
+    """Return absolute paths of git-modified/untracked files, or None.
 
     None means the modification set is unknown (not a git repository, git
     missing, or git failed) — the caller then validates everything found,
     preserving the pre-git behaviour.
     """
     try:
+        root = subprocess.run(
+            ['git', '-C', workspace, 'rev-parse', '--show-toplevel'],
+            capture_output=True, text=True, timeout=10)
+        if root.returncode != 0:
+            return None
+        # --no-optional-locks: a plain `git status` refreshes and rewrites
+        # .git/index under index.lock. Run at every Stop, that made a
+        # concurrent `git add`/`git commit` in the same repository fail with
+        # "index.lock: File exists" (16 of 890 adds in one measurement), and
+        # it writes into a workspace the hook must otherwise leave alone.
         proc = subprocess.run(
-            ['git', '-C', workspace, 'status', '--porcelain', '-z',
-             '--untracked-files=all', '--no-renames'],
+            ['git', '--no-optional-locks', '-C', workspace, 'status',
+             '--porcelain', '-z', '--untracked-files=all', '--no-renames',
+             '--', '.'],
             capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return None
@@ -562,28 +771,53 @@ def _git_touched_paths(workspace):
         # Porcelain v1: two status chars, a space, then the path.
         p = record[3:]
         if p:
-            paths.add(os.path.realpath(os.path.join(workspace, p)))
+            # Porcelain paths are relative to the Git root, even when cwd is
+            # a package subdirectory. Keep the lexical filename for filtering;
+            # resolving a symlink here would lose its extension and location.
+            paths.add(os.path.abspath(os.path.join(root.stdout.rstrip('\n'), p)))
     return paths
+
+
+def _validation_files(workspace):
+    """Select changed candidates without a walk; scan once when Git is unknown."""
+    workspace = os.path.realpath(workspace)
+    touched = _git_touched_paths(workspace)
+    if touched is None:
+        candidates = []
+        for root, dirs, files in os.walk(workspace):
+            dirs[:] = [d for d in dirs
+                       if not _should_skip(os.path.join(root, d), workspace)]
+            candidates.extend(os.path.join(root, name) for name in files)
+    else:
+        candidates = sorted(touched)
+
+    launch_files, package_xmls, yaml_files = [], [], []
+    for path in candidates:
+        # Preserve the scan's directory/depth exclusions for direct Git paths.
+        # A deleted file, directory, FIFO, or escaping link is not a candidate.
+        if (_should_skip(os.path.dirname(path), workspace)
+                or not os.path.isfile(path)
+                or not Path(os.path.realpath(path)).is_relative_to(workspace)):
+            continue
+        name = os.path.basename(path)
+        if name.endswith(('.launch.py', '_launch.py')):
+            launch_files.append(path)
+        elif name == 'package.xml':
+            package_xmls.append(path)
+        elif name.endswith(('.yaml', '.yml')):
+            yaml_files.append(path)
+    return launch_files, package_xmls, yaml_files
 
 
 def main():
     workspace = _resolve_workspace()
     all_issues = []
 
-    launch_files = find_generated_launch_files(workspace)
-    package_xmls = find_package_xmls(workspace)
-    yaml_files = find_yaml_files(workspace)
-
-    # Scope validation to files this session plausibly touched (see module
-    # docstring). Unknown modification set -> validate everything.
-    touched = _git_touched_paths(workspace)
-    if touched is not None:
-        launch_files = [f for f in launch_files
-                        if os.path.realpath(f) in touched]
-        package_xmls = [f for f in package_xmls
-                        if os.path.realpath(f) in touched]
-        yaml_files = [f for f in yaml_files
-                      if os.path.realpath(f) in touched]
+    launch_files, package_xmls, yaml_files = _validation_files(workspace)
+    if not _workspace_is_explicit():
+        scope_root = os.path.realpath(workspace)
+        launch_files = [lf for lf in launch_files
+                        if _launch_file_in_scope(lf, scope_root)]
 
     for lf in launch_files:
         all_issues.extend(validate_launch_file_syntax(lf))
@@ -591,19 +825,23 @@ def main():
     for px in package_xmls:
         all_issues.extend(validate_package_xml(px))
 
-    for yf in yaml_files:
-        all_issues.extend(validate_nav2_yaml(yf))
-
     # Distinguish "no findings" from "check never ran": the key is always
     # present so consumers get a stable schema, and the PyYAML entry is
     # only added when there was actually YAML in scope to check.
     checks_skipped = []
+    for yf in yaml_files:
+        for issue in validate_nav2_yaml(yf):
+            if issue['severity'] == 'skipped':
+                checks_skipped.append(f"nav2_yaml: {issue['file']}: {issue['message']}")
+            else:
+                all_issues.append(issue)
+
     if yaml_files and not _HAVE_YAML:
         checks_skipped.append('nav2_yaml: PyYAML is not installed')
 
     result = {
         'hook': 'ros2-engineering-skills:stop',
-        'version': '1.3.0',
+        'version': '1.5.0',
         'issues_count': len(all_issues),
         'issues': all_issues,
         'checks_skipped': checks_skipped,

@@ -22,9 +22,14 @@
 ## 1. Lifecycle node state machine
 
 Lifecycle (managed) nodes follow the ROS 2 managed node state machine defined
-in the [Managed Nodes design article](https://design.ros2.org/articles/node_lifecycle.html). Every node that owns
-resources (hardware drivers, sensor pipelines, planners, controllers) should
-be a lifecycle node.
+in the [Managed Nodes design article](https://design.ros2.org/articles/node_lifecycle.html).
+Choose lifecycle from resource ownership and supervision: it is useful when a
+manager needs explicit configuration, activation, cleanup, and recovery
+transitions. A plain node can be appropriate when an outer supervisor owns
+those obligations, for third-party nodes whose lifecycle behavior you cannot
+change, or on targets with limited lifecycle support such as rclc/micro-ROS.
+Document who owns initialization, stopping, resource release, and recovery;
+adding a lifecycle state machine also adds transition failures to manage.
 
 ```text
                      ┌───────────────┐
@@ -44,7 +49,7 @@ be a lifecycle node.
                      │   Finalized    │
                      └───────────────┘
 
-              on_error is triggered on any transition failure:
+              on_error is triggered by a transition callback returning ERROR:
                      ┌───────────────┐
               ────►  │  ErrorProcessing│ ──► Unconfigured (if recovery succeeds)
                      └───────────────┘  ──► Finalized (if recovery fails)
@@ -55,9 +60,18 @@ be a lifecycle node.
 | State | What the node does | Resources |
 |---|---|---|
 | Unconfigured | Nothing — waiting for configuration | None allocated |
-| Inactive | Configured but not processing | Allocated but not active |
+| Inactive | Configured; application must gate ordinary callbacks | Allocated but not active |
 | Active | Fully operational, processing data | Allocated and active |
-| Finalized | Terminated, cannot be restarted | Released |
+| Finalized | Lifecycle ended; not proof the process exited | Cleanup callback must release resources |
+
+A callback returning `FAILURE` and one returning `ERROR` take different state
+machine paths. For example, rejected configuration returns to Unconfigured;
+it need not invoke error processing. Ordinary timers and subscriptions are not
+automatically stopped by the lifecycle label. Explicitly cancel or destroy owned
+timers in deactivation, cleanup, shutdown, and error handling. Declare parameters
+once (usually in the constructor), then read and validate them on every configure
+so cleanup followed by reconfiguration does not redeclare them. Check both normal
+cycles and rejected configurations with actual executor activity.
 
 **Why lifecycle matters:**
 
@@ -113,22 +127,21 @@ public:
   }
 
   // on_activate: start processing, enable outputs
-  CallbackReturn on_activate(const rclcpp_lifecycle::State & /*previous_state*/) override
+  CallbackReturn on_activate(const rclcpp_lifecycle::State & state) override
   {
     RCLCPP_INFO(get_logger(), "Activating...");
-    // LifecyclePublisher automatically enables on activate
-    // Any additional activation logic (e.g., hardware enable) goes here
-    return CallbackReturn::SUCCESS;
+    // An override must delegate to activate the managed lifecycle publishers.
+    // The Active state label alone does not enable this publisher.
+    return LifecycleNode::on_activate(state);
   }
 
   // on_deactivate: stop processing, disable outputs
-  CallbackReturn on_deactivate(const rclcpp_lifecycle::State & /*previous_state*/) override
+  CallbackReturn on_deactivate(const rclcpp_lifecycle::State & state) override
   {
     RCLCPP_INFO(get_logger(), "Deactivating...");
-    // LifecyclePublisher automatically disables on deactivate
-    // Clear transient state
+    const auto result = LifecycleNode::on_deactivate(state);
     filter_buffer_.clear();
-    return CallbackReturn::SUCCESS;
+    return result;
   }
 
   // on_cleanup: release resources, return to Unconfigured
@@ -151,10 +164,14 @@ public:
     return CallbackReturn::SUCCESS;
   }
 
-  // on_error: called when a transition fails — attempt recovery
+  // on_error: called for a transition ERROR — attempt recovery
   CallbackReturn on_error(const rclcpp_lifecycle::State & previous_state) override
   {
     RCLCPP_ERROR(get_logger(), "Error from state %s", previous_state.label().c_str());
+    // Recovery to Unconfigured must release resources from partial configuration.
+    scan_pub_.reset();
+    scan_sub_.reset();
+    filter_buffer_.clear();
     // Return SUCCESS to transition to Unconfigured (recovery)
     // Return FAILURE to transition to Finalized (unrecoverable)
     return CallbackReturn::SUCCESS;
@@ -195,26 +212,74 @@ RCLCPP_COMPONENTS_REGISTER_NODE(my_robot_perception::LidarProcessor)
 
 ### Key lifecycle publisher behavior
 
-`LifecyclePublisher` is a special publisher that only delivers messages when
-the node is in the `Active` state. Messages published in other states are
-silently dropped. This prevents accidental output during configuration or
-after deactivation.
+`LifecyclePublisher` has its own activation flag; the node's state label alone
+does not toggle it. The default `LifecycleNode::on_activate` and
+`on_deactivate` callbacks update managed publishers. An override must call the
+base implementation, as above, or explicitly manage every publisher. Otherwise
+an Active node may publish nothing, or a publisher may remain enabled after a
+transition. Publishing while disabled is suppressed and may produce a warning.
+This is application-level lifecycle behavior, not a hardware safety function.
 
 ```cpp
-// This publisher only works when the node is Active
-auto pub = create_publisher<Msg>("topic", qos);  // LifecyclePublisher
+// rclcpp LifecycleNode::create_publisher creates a managed LifecyclePublisher.
+// Its activation depends on the transition callbacks being wired correctly.
+auto pub = create_publisher<Msg>("topic", qos);
 
-// Note: In a lifecycle node, ALL publishers from create_publisher() are
-// LifecyclePublishers that are silenced outside Active state.
-// For always-active publishing (diagnostics, heartbeats), use a separate
-// rclcpp::Node dedicated to diagnostics running in the same process.
+// For always-active diagnostics, use a separate rclcpp::Node in the same process.
 ```
+
+In rclpy, pair `create_lifecycle_publisher()` with
+`destroy_lifecycle_publisher()`. The ordinary `destroy_publisher()` removes the
+native publisher but does not unregister its managed lifecycle object. Test
+cleanup/reconfigure and active shutdown, not just the first activation.
+
+### Exception-safe cleanup for resource owners
+
+[`rclcpp::TimerBase::cancel()` can throw](https://github.com/ros2/rclcpp/blob/jazzy/rclcpp/include/rclcpp/timer.hpp).
+Calling it unguarded inside a project-defined cleanup function such as
+`halt() noexcept` (not an rclcpp API) can invoke `std::terminate` before
+a later stop transmission or transport close is attempted. One `try` block
+around the entire cleanup sequence also skips later steps after the first
+exception.
+
+1. Fence ordinary writes first at the driver's write boundary, synchronized
+   with every writer, including callbacks already in flight. A lifecycle label
+   or timer cancellation alone does not provide that fence.
+2. Isolate each fallible operation: timer cancellation, the configured
+   best-effort stop/zero transmission, and transport close each need their own
+   error boundary. Handle unsuccessful return codes as well as exceptions,
+   continue independent cleanup attempts, and attempt the stop transmission
+   before closing its transport. Keep each operation within its configured
+   deadline and make repeated cleanup safe after partial initialization.
+3. Retain cleanup failure status for the lifecycle caller or supervisor. A
+   later successful close must not erase an earlier cancellation or stop
+   failure. Do not report successful resource release when required cleanup
+   failed.
+4. Use `noexcept` only when no exception can escape, including from error
+   reporting. In a destructor or other nonthrowing path, record failure in
+   nonthrowing status storage before attempting diagnostics, and contain
+   exceptions from each cleanup attempt separately.
+
+Successful cleanup, a Finalized lifecycle state, or an accepted zero command
+does not prove that an actuator stopped. Keep the downstream command
+timeout/watchdog and independent stop path required by the ownership design;
+stop claims require remote acceptance evidence and measured response. Process
+cleanup is best effort and cannot replace those mechanisms after a crash.
+
+Inspect destructors as well as explicit cleanup calls. In the linked Jazzy
+implementation, `GenericTimer` calls `cancel()` again in its destructor. If
+cancellation keeps failing, the last shared-pointer release can terminate the
+process instead of reaching an outer `catch`. Finish required stop/close attempts
+and retain their failure status before releasing the timer; an interrupted
+lifecycle transition must not be reported as completed cleanup. Check the
+installed implementation when evaluating this failure path.
 
 ## 3. Implementing lifecycle transitions (rclpy)
 
 ```python
 import rclpy
-from rclpy.lifecycle import LifecycleNode, State, TransitionCallbackReturn
+from rclpy.executors import ExternalShutdownException
+from rclpy.lifecycle import LifecycleNode, LifecycleState, TransitionCallbackReturn
 from sensor_msgs.msg import LaserScan
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 
@@ -227,7 +292,7 @@ class LidarProcessor(LifecycleNode):
         self._scan_pub = None
         self._scan_sub = None
 
-    def on_configure(self, state: State) -> TransitionCallbackReturn:
+    def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info('Configuring...')
         self._min_range = self.get_parameter('min_range').value
         self._max_range = self.get_parameter('max_range').value
@@ -239,29 +304,35 @@ class LidarProcessor(LifecycleNode):
 
         return TransitionCallbackReturn.SUCCESS
 
-    def on_activate(self, state: State) -> TransitionCallbackReturn:
+    def on_activate(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info('Activating...')
         return super().on_activate(state)
 
-    def on_deactivate(self, state: State) -> TransitionCallbackReturn:
+    def on_deactivate(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info('Deactivating...')
         return super().on_deactivate(state)
 
-    def on_cleanup(self, state: State) -> TransitionCallbackReturn:
+    def on_cleanup(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info('Cleaning up...')
-        self.destroy_publisher(self._scan_pub)
-        self.destroy_subscription(self._scan_sub)
-        self._scan_pub = None
-        self._scan_sub = None
+        self._release_resources()
         return TransitionCallbackReturn.SUCCESS
 
-    def on_shutdown(self, state: State) -> TransitionCallbackReturn:
+    def on_shutdown(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f'Shutting down from {state.label}')
-        if self._scan_pub:
-            self.destroy_publisher(self._scan_pub)
-        if self._scan_sub:
-            self.destroy_subscription(self._scan_sub)
+        self._release_resources()
         return TransitionCallbackReturn.SUCCESS
+
+    def on_error(self, state: LifecycleState) -> TransitionCallbackReturn:
+        self._release_resources()
+        return TransitionCallbackReturn.SUCCESS
+
+    def _release_resources(self):
+        if self._scan_pub is not None:
+            self.destroy_lifecycle_publisher(self._scan_pub)
+            self._scan_pub = None
+        if self._scan_sub is not None:
+            self.destroy_subscription(self._scan_sub)
+            self._scan_sub = None
 
     def _scan_callback(self, msg: LaserScan):
         if self._scan_pub is None or not self._scan_pub.is_activated:
@@ -284,14 +355,18 @@ class LidarProcessor(LifecycleNode):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = LidarProcessor()
+    node = None
     try:
+        node = LidarProcessor()
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            if node is not None:
+                node.destroy_node()
+        finally:
+            rclpy.try_shutdown()
 ```
 
 ## 4. Component node registration
@@ -410,13 +485,18 @@ ros2 component unload /my_container 1
 |---|---|---|
 | `component_container` | Single-threaded executor | Simple pipelines, no concurrency needed |
 | `component_container_mt` | Multi-threaded executor | Components with slow callbacks or independent data paths |
-| `component_container_isolated` | Per-component executor | Maximum isolation, each component has its own executor thread(s) |
+| `component_container_isolated` | Per-component executor, still one process | A slow callback in one component must not block another. Not crash isolation: a SIGSEGV in any component ends the whole container. Not available on Foxy |
 
 **Selection guide:**
 
 - Default to `component_container_mt` — most flexible
 - Use `component_container_isolated` when one component's slow callback
   must not block others (e.g., ML inference alongside control)
+- Executor isolation is not fault isolation. Every container type is one
+  process: a crash in a vendor codec or GPU library (one field case: NVJPEG
+  SIGSEGV in a camera component, twice) takes every component with it. Run
+  crash-prone work in a child process or in a separate container process, and
+  keep the components that own actuators out of that process
 - Use `component_container` only for trivial pipelines with lightweight callbacks
 
 ### `component_container_isolated` launch example
@@ -686,7 +766,7 @@ ros2 lifecycle set /lidar_processor shutdown
 | Symptom | Cause | Fix |
 |---|---|---|
 | Component not found during load | Plugin not registered or shared library not installed | Verify `rclcpp_components_register_nodes()` in CMakeLists.txt, rebuild, source setup.bash |
-| LifecyclePublisher not publishing | Node not in Active state | Transition to Active before publishing; check with `ros2 lifecycle get` |
+| LifecyclePublisher not publishing | Node inactive or publisher activation callback bypassed | Check the live state and ensure overrides delegate to the base callbacks or explicitly activate the publisher |
 | `on_configure` fails | Resource allocation error (port busy, memory) | Log the specific error, ensure cleanup releases resources on retry |
 | Transition hangs indefinitely | Blocking call in transition callback | Keep transitions fast; offload heavy init to a thread if needed |
 | Components crash container | Unhandled exception in one component | Catch all exceptions in component callbacks; consider `component_container_isolated` |

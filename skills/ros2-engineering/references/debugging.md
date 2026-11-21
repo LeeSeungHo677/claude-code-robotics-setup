@@ -353,7 +353,7 @@ for callback in handler.data.callback_instances:
 
 ```bash
 # Record CPU profile for a running node
-perf record -g -p $(pgrep -f driver_node) -- sleep 10
+perf record -g -p $(pgrep -f '[d]river_node') -- sleep 10   # [d] keeps pgrep from matching this shell
 
 # Generate flamegraph
 perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg
@@ -470,6 +470,19 @@ ros2 bag record -o bounded_bag \
   /scan
 ```
 
+### Finalize the recording before you copy or judge it
+
+A bag that is still being written is not a finalized recording artifact. rosbag2
+writes `metadata.yaml` when the writer closes, so a directory copied while the
+recorder runs may be incomplete or inconsistent. Stop the recorder cleanly, then
+check the finalized metadata, the storage-file inventory, and per-topic message
+counts with `ros2 bag info` before copying or drawing conclusions. If a recording
+must survive an interactive SSH disconnect, decouple the recorder lifetime from
+that session. Check free disk before recording, and, when retained or
+transient-local data matters, match the recorder's QoS to the actual publisher.
+
+Source: [SequentialWriter::close writes the metadata](https://github.com/ros2/rosbag2/blob/humble/rosbag2_cpp/src/rosbag2_cpp/writers/sequential_writer.cpp).
+
 ### Playback
 
 ```bash
@@ -519,7 +532,7 @@ from sensor_msgs.msg import LaserScan
 reader = SequentialReader()
 storage_options = StorageOptions(
     uri='my_bag',
-    storage_id='mcap')  # MCAP is the default format since Jazzy; use 'sqlite3' for Humble compatibility
+    storage_id='mcap')  # MCAP is the default format since Iron; use 'sqlite3' for Humble compatibility
 converter_options = ConverterOptions(
     input_serialization_format='cdr',
     output_serialization_format='cdr')
@@ -537,7 +550,7 @@ while reader.has_next():
 MCAP became the default bag format in Iron (and continues in Jazzy/Kilted/Rolling), replacing SQLite3. It offers faster writes, better compression, and indexed random access.
 
 ```bash
-# Record with MCAP (default in Jazzy+)
+# Record with MCAP (default in Iron+)
 ros2 bag record -a -o my_bag
 
 # Record with compression (recommended for production)
@@ -661,6 +674,16 @@ ip maddr show
 export CYCLONEDDS_URI='<CycloneDDS><Domain><General><Interfaces><NetworkInterface name="eth0"/></Interfaces></General></Domain></CycloneDDS>'
 ```
 
+Pinning an interface is a change to every process that reads that variable,
+not a diagnostic. Before it: read each running process's DDS configuration
+(`/proc/<pid>/environ` for `CYCLONEDDS_URI` and `FASTRTPS_DEFAULT_PROFILES_FILE`,
+`references/runtime-provenance.md` §2); a launcher-exported URI is the live
+configuration, not the file in the repository. After it: verify with the full
+graph running and an A/B/A toggle, not with `ros2 topic list` alone. On a
+multi-homed robot, pinning the wired interface can silently break onboard
+traffic that was crossing Wi-Fi (one field case lost LiDAR forwarding and
+localization until the pin was reverted).
+
 ### Localhost-only debugging
 
 ```bash
@@ -720,9 +743,10 @@ Fix: Create all subscriptions in constructor/on_configure, never in callbacks
 | "No executable found" for `ros2 run` | Package not built or not sourced | `colcon build`, `source install/setup.bash` |
 | Node shows in `ros2 node list` but no topics | Node created but not spinning | Verify `rclcpp::spin()` or executor is running |
 | Messages arrive with wrong timestamp | Clock skew between machines | Use NTP/PTP synchronization, or `use_sim_time` with `/clock` |
-| `ros2 topic echo` shows nothing | QoS mismatch (echo defaults to RELIABLE) | Use `ros2 topic echo --qos-reliability best_effort` for sensor topics |
+| `ros2 topic echo` shows nothing | QoS mismatch. Foxy's echo uses the `sensor_data` preset (BEST_EFFORT, VOLATILE; `ros2topic/verb/echo.py`), Humble and later adapt reliability and durability to the publisher. On Foxy a latched (TRANSIENT_LOCAL) topic shows nothing without an explicit durability | Read `ros2 topic info -v` first. Foxy: `ros2 topic echo --qos-reliability reliable --qos-durability transient_local /map` for latched topics, `--qos-reliability reliable` for reliable-only publishers |
 | GDB shows `<optimized out>` for variables | Release build | Build with `-DCMAKE_BUILD_TYPE=Debug` or `RelWithDebInfo` |
 | Bag playback too fast | Missing `--clock` flag | Add `--clock` and set `use_sim_time: true` on nodes |
+| Copied bag has no `metadata.yaml` or fewer messages | Copied while the recorder was still writing | Stop the recorder cleanly; verify with `ros2 bag info`; copy the finalized directory (§5) |
 | rqt_graph shows disconnected nodes | Nodes on different DDS domains | Verify `ROS_DOMAIN_ID` is the same on all machines |
 | valgrind reports leaks in rclcpp | Known ROS 2 library allocations (not true leaks) | Suppress ROS 2 internal allocations, focus on your code |
 
