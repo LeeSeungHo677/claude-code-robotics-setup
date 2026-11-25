@@ -143,7 +143,7 @@ for ev, groups in d.get('hooks', {}).items():
                 print('  SKIP    ', ev, '(인라인 셸)'); skip += 1; continue
             try:
                 # 환경변수 확장 필수 — settings.json 은 HOME 을 리터럴로 담고 있다
-                # 마지막 토큰은 인자일 수 있다(`bash x.sh session`) → '/' 가 든 마지막 토큰을 경로로 본다
+                # 마지막 토큰은 인자일 수 있다('bash x.sh session') → '/' 가 든 마지막 토큰을 경로로 본다
                 paths = [t for t in shlex.split(cmd) if '/' in t]
                 p = os.path.expandvars(paths[-1])
             except (ValueError, IndexError):
