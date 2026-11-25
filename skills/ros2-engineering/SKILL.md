@@ -9,7 +9,7 @@ description: >
 
 # ROS 2 Engineering Skills
 
-<!-- 출처: dbwls99706/ros2-engineering-skills v1.8.1 + f69417c (Apache-2.0), 2026-11-21 재동기화.
+<!-- 출처: dbwls99706/ros2-engineering-skills v1.9.1 99b9bc6 (Apache-2.0), 2026-11-25 재동기화 (이전: v1.8.1 + f69417c, 2026-11-21).
      로컬 수정: 프론트매터(name·description) 로컬 유지 · 업스트림 hooks/hooks.json·.claude-plugin 미포함 ·
      docs/ 는 SKILL.md·validate_skill 이 가리키는 3개만 · 라우터에 로컬 행 1개 · 아래 로컬 주의 블록 -->
 
@@ -166,6 +166,7 @@ only for an authorized launch.
 |---|---|
 | Generate a package after changes are authorized | `scripts/create_package.py` |
 | Inspect a launch file or directory statically | `scripts/launch_validator.py` |
+| Check that a workspace's files agree with each other (static) | `scripts/workspace_checks.py` |
 | Run an authorized launch (POSIX) | `scripts/launch_supervisor.py` |
 | Compare declared offered/requested QoS | `scripts/qos_checker.py` |
 | Audit QoS declarations across a package (static) | `scripts/qos_audit.py` |
