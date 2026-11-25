@@ -14,6 +14,8 @@ tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "WebFetch"]
 2. 데이터가 어디서 오는지 확인한다 — 폴링인가 푸시인가, 실패하면 어떻게 되는가.
 3. 이 화면을 **누가 얼마나 자주 보는지** 확인한다. 매일 8시간 보는 관제 화면과
    가끔 여는 설정 화면은 설계가 다르다.
+4. 화면을 새로 만들거나 다시 디자인하면 `design-system` 「만드는 절차」(DESIGN.md → 컨셉 3개 → 고른 안)를 따르고,
+   끝나면 `python3 ~/.claude/skills/design-system/scripts/design_lint.py <경로>` 로 검사한다.
 
 ## 반드시 구현하는 상태
 
