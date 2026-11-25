@@ -93,11 +93,15 @@ def main():
         ok = want == got
         fails += not ok
         print(f"  {'PASS' if ok else 'FAIL'}  #{i:02} [{want}{'' if ok else '→' + got}]")
-    # 깨진 입력은 조용히 통과 (fail-open)
-    r = subprocess.run([sys.executable, HOOK], input="not json", capture_output=True, text=True)
-    ok = r.returncode == 0
+    # 깨진 입력은 조용히 통과 (fail-open) — 기록은 임시 HOME 에 남겨 실제 ~/.claude/logs/hook-errors.log 를 더럽히지 않는다
+    fake_home = os.path.join(tmp, "home")
+    os.makedirs(fake_home)
+    r = subprocess.run([sys.executable, HOOK], input="not json", capture_output=True, text=True,
+                       env={**os.environ, "HOME": fake_home})
+    logged = os.path.isfile(os.path.join(fake_home, ".claude", "logs", "hook-errors.log"))
+    ok = r.returncode == 0 and logged
     fails += not ok
-    print(f"  {'PASS' if ok else 'FAIL'}  깨진 stdin → exit {r.returncode}")
+    print(f"  {'PASS' if ok else 'FAIL'}  깨진 stdin → exit {r.returncode}, 임시 HOME 에 기록 {logged}")
     shutil.rmtree(tmp, ignore_errors=True)
     total = len(cases) + 1
     print(f"\n{total - fails}/{total} 통과")
