@@ -65,6 +65,9 @@ cd claude-code-robotics-setup
 `imitation-learning` · `legged-rl` · `vla-vlm-robotics` · `robot-safety-compliance` ·
 `multi-robot-fleet` · `robot-networking` · `fieldbus-comm` · `incident-analysis`
 
+웹·앱 화면은 `design-system` 이 중심이다 — DESIGN.md → 서로 다른 컨셉 3개 → 고른 안 → `scripts/design_lint.py`(AI 티 자동 검사).
+화면 종류(랜딩·제품·데이터 플랫폼·관제)와 상관없이 같은 절차, 관제 화면은 안전 최소선 2개만 추가로 지킨다.
+
 ### 한 번의 요청이 지나가는 길
 
 ```mermaid
@@ -235,10 +238,18 @@ CLAUDE_DIR=/tmp/try ./install.sh   # 다른 위치에 시험 설치
 | `hallmark` | [Nutlope/hallmark](https://github.com/Nutlope/hallmark) | MIT | `install-hook.mjs`·`install.mjs` 는 settings.json 에 훅을 등록한다 — 실행하지 않는다. 이미지 생성 스크립트는 API 키가 있으면 외부로 보낸다. Node·Chrome 필요 |
 | `design-taste-frontend` (taste-skill) | [Leonxlnx/taste-skill](https://github.com/Leonxlnx/taste-skill) | MIT | **프론트매터의 `hooks: Stop:` 블록은 지우고 넣는다** — 턴이 끝날 때마다 검사 스크립트가 돈다(timeout 600). 레포의 `install.sh` 는 심볼릭 링크라 버전 고정이 안 된다 |
 | `ui-ux-pro-max` | [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) | MIT | 스크립트는 Python 표준 라이브러리만, 네트워크 없음 |
-| `image-to-code` | [Leonxlnx/imagegen-skills](https://github.com/Leonxlnx/imagegen-skills) | MIT | 이미지 생성 도구 전제. 외부 생성 서비스로 시안을 보내기 전에 확인. 운영 화면용 아님 |
+| `image-to-code` | [Leonxlnx/imagegen-skills](https://github.com/Leonxlnx/imagegen-skills) | MIT | 이미지 생성 도구 전제. 외부 생성 서비스로 시안을 보내기 전에 확인. 랜딩 기준 도구라 대시보드엔 판독성 점검을 더한다 |
 | `agent-browser` | [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser) | Apache-2.0 | npm CLI 필요. `agent-browser install` 은 Chrome for Testing 을 따로 받는다 — 시스템 Chrome 이 있으면 생략 가능 |
 | `webapp-testing` | [anthropics/skills](https://github.com/anthropics/skills/tree/main/skills/webapp-testing) | Apache-2.0 | Anthropic 공식. 자동 발동으로 둬도 된다. Playwright 버전을 설치된 브라우저 빌드에 맞춰 고정 |
 | Impeccable (플러그인) | [pbakaus/impeccable](https://github.com/pbakaus/impeccable) | Apache-2.0 | 엔진이 디자인 선택 결과를 외부로 보낸다 → `settings.json` `env` 에 `IMPECCABLE_NO_TELEMETRY=1`·`IMPECCABLE_NO_UPDATE_CHECK=1`. 플러그인 훅(모든 편집에 엔진 실행)을 끄려면 `IMPECCABLE_HOOK_DISABLED=1`. 텔레메트리를 꺼도 roll 기능은 쓰는 순간 서버에 요청한다. 플러그인 스킬 SKILL.md 에 `disable-model-invocation: true` (업데이트마다 다시) |
+
+**선택 연동 — 디자인 MCP (외부 서비스, 이 레포가 설정하지 않는다)** — `design-system` 의
+`references/reference-extraction.md` §4·§5 가 쓰는 법과 실측 결과를 담고 있다. 연결은 각자 계정으로 한다.
+
+| 서비스 | 쓰는 자리 | 연결 · 주의 |
+|---|---|---|
+| Figma MCP | 컨셉 여러 개를 한 페이지에 나란히 올려 고르고, 사람이 다듬는 곳. 팀 라이브러리(토큰·컴포넌트)가 있으면 그 기준으로 | Figma 공식 MCP/플러그인. 유료 플랜 기능이 섞여 있다 |
+| Google Stitch MCP | 분위기·색·글꼴 후보를 빠르게 여러 개 보기 (탐색 전용) | `read -s STITCH_API_KEY` 로 받은 뒤 `claude mcp add --transport http -s user stitch https://stitch.googleapis.com/mcp --header "X-Goog-Api-Key: $STITCH_API_KEY"` — 키를 명령줄에 직접 쓰지 않는다. 결과는 사양을 지어내고 레이아웃이 비슷하게 나온다 → 사실 대조 후 우리 토큰·lint 로 다시 만든다 |
 
 ### 요구사항
 

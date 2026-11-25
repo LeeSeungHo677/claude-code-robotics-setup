@@ -13,7 +13,7 @@ description: >
 > **적용 범위**: 웹·앱·플랫폼 **모든 UI 의 공통 절차**(방향 문서 → 토큰 → 시안 비교 → 렌더 비평 → lint)는 이 스킬이다.
 > 운영자 대시보드·관제 화면·내부 도구도 같은 절차(3a 컨셉 펼치기 포함)를 쓴다. 꼭 지킬 것은 **안전 최소선 2개**뿐이고
 > ([`references/operational-ui.md`](references/operational-ui.md) 맨 위), 나머지 관제 관례는 같은 문서의 참고 자료다.
-> 연출이 필요한 **소개·랜딩·데모**의 미학은 `frontend-design` 이 주도하고(절차·lint 는 여기를 따른다), genjutsu 플러그인을
+> 미학·연출 방향은 화면 종류와 상관없이 `frontend-design` 이 주도하고(절차·lint 는 여기를 따른다), genjutsu 플러그인을
 > 켜 두었다면 `genjutsu:cast`·`genjutsu:paint` 도 그쪽이다.
 > 관제 화면에 연출을 써도 된다 — 다만 실시간 값의 판독을 가리면 그 부분은 판독이 이긴다.
 

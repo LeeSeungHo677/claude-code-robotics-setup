@@ -9,6 +9,7 @@
 cd ~/.claude/eval-harness
 claude plugin eval . --ablation none --runs 3 -j 3 --no-publish --max-cost-usd 3 --trust-plugin
 # 한 케이스만: --case routing-nav2   (--case 를 여러 번 주면 마지막 것만 적용된다)
+# 여러 케이스만: 임시 폴더에 .claude-plugin 복사 + skills 심볼릭 링크 + evals/ 에 고를 케이스만 복사한 뒤 거기서 실행
 ```
 - `--ablation none`: 기본(with-without)이면 `tool_used: Skill` 이 점수에서 빠진다.
 - `--no-publish`: 보고서를 claude.ai 에 올리지 않는다.
