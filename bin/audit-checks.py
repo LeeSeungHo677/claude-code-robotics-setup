@@ -82,22 +82,33 @@ def check_policy(settings):
     return ["| 명령 | settings ask/deny | guard | allow 에 섞임 | 판정 |", "|---|---|---|---|---|"] + out
 
 
-def check_budget():
-    skills = glob.glob(os.path.join(C, "skills", "*", "SKILL.md"))
-    sdesc = [(os.path.basename(os.path.dirname(p)), str(frontmatter(p).get("description", ""))) for p in skills]
-    adesc = [str(frontmatter(p).get("description", "")) for p in glob.glob(os.path.join(C, "agents", "*.md"))]
-    mem = glob.glob(os.path.join(C, "projects", "*", "memory", "MEMORY.md"))
+def check_budget(root=C, settings=None):
+    # 매 세션 목록에 실리는 것은 켜진 자동 스킬뿐이다. 꺼진(skillOverrides)·수동 전용(disable-model-invocation)은
+    # 목록에 안 들어가므로 예산에서 빼고 따로 보여 준다 (전에는 전부 더해 실제의 ~6배로 경고했다).
+    mine, off, manual = skill_states(root, settings)
+    desc = lambda s: str(frontmatter(os.path.join(root, "skills", s, "SKILL.md")).get("description", ""))
+    sdesc = [(s, desc(s)) for s in mine if s not in off and s not in manual]
+    adesc = [str(frontmatter(p).get("description", "")) for p in glob.glob(os.path.join(root, "agents", "*.md"))]
+    # MEMORY.md 는 프로젝트별로 그 프로젝트 세션에만 실린다 — 가장 긴 하나가 최악의 세션 비용
+    mem = [(sum(1 for _ in open(p, encoding="utf-8")), p)
+           for p in glob.glob(os.path.join(root, "projects", "*", "memory", "MEMORY.md"))]
+    mem_n, mem_p = max(mem, default=(0, ""))
+    cm = os.path.join(root, "CLAUDE.md")
     vals = {
-        "CLAUDE.md bytes": os.path.getsize(os.path.join(C, "CLAUDE.md")),
+        "CLAUDE.md bytes": os.path.getsize(cm) if os.path.isfile(cm) else 0,
         "skill descriptions chars": sum(len(d) for _, d in sdesc),
         "agent descriptions chars": sum(len(d) for d in adesc),
-        "MEMORY.md lines": max((sum(1 for _ in open(p, encoding="utf-8")) for p in mem), default=0),
+        "MEMORY.md lines": mem_n,
     }
     out = ["| 항목 | 현재 | 예산 | |", "|---|---|---|---|"]
     for k, v in vals.items():
         out.append(f"| {k} | {v:,} | {BUDGET[k]:,} | {'✗ 초과' if v > BUDGET[k] else 'OK'} |")
+    out.append(f"\nskill descriptions = 켜진 자동 스킬 {len(sdesc)}개만. 목록에 안 실리는 것 — "
+               f"꺼짐 {len(off)}개 {sum(len(desc(s)) for s in off):,}자 · 수동 전용 {len(manual)}개 {sum(len(desc(s)) for s in manual):,}자")
+    if mem_p:
+        out.append(f"가장 긴 MEMORY.md: `{os.path.basename(os.path.dirname(os.path.dirname(mem_p)))}` ({mem_n}줄, 그 프로젝트 세션에만 실림)")
     top = sorted(sdesc, key=lambda x: -len(x[1]))[:5]
-    out.append("\n가장 긴 스킬 description: " + ", ".join(f"`{n}`({len(d)})" for n, d in top))
+    out.append("가장 긴 켜진 스킬 description: " + ", ".join(f"`{n}`({len(d)})" for n, d in top))
     return out
 
 

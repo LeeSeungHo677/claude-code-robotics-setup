@@ -149,6 +149,18 @@ def main():
               and "`off-b`" not in out[1] and "꺼진 스킬 3개" not in out[2] and "꺼진 스킬 2개" in out[2]
               and "수동 전용 1개" in out[2], out)
 
+        # 2단계 예산은 목록에 실리는 켜진 자동 스킬만 센다 (2026-11-25). description "d" = 1자
+        # 켜진 자동 = on-a, off-bb → 2자. 꺼짐(off-b·uio-d)·수동(man-c)까지 더하면 5자가 된다
+        out = ac.check_budget(root, st)
+        row = next(l for l in out if l.startswith("| skill descriptions chars"))
+        check("예산 — 켜진 자동 스킬만 합산, 꺼짐·수동은 따로 표시", row.startswith("| skill descriptions chars | 2 |")
+              and any("꺼짐 2개 2자" in l and "수동 전용 1개 1자" in l for l in out), out)
+        w(root, "projects/-p-small/memory/MEMORY.md", "a\n")
+        w(root, "projects/-p-big/memory/MEMORY.md", "a\nb\nc\n")
+        out = ac.check_budget(root, st)
+        check("예산 — 가장 긴 MEMORY.md 의 줄 수와 프로젝트 이름", any(l.startswith("| MEMORY.md lines | 3 |") for l in out)
+              and any("`-p-big` (3줄" in l for l in out), out)
+
     print(f"\n실패 {len(fails)}건" + (f": {fails}" if fails else " — 전부 통과"))
     sys.exit(1 if fails else 0)
 
