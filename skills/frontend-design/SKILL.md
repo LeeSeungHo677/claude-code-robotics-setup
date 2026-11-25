@@ -1,25 +1,25 @@
 ---
 name: frontend-design
 description: >
-  개성 있는 프로덕션급 프론트엔드 UI 구현. TRIGGER when the user builds web components, pages, landing pages, or
-  artifacts and wants polished, non-generic visual design. 운영·관제 대시보드에는 쓰지 않는다 — 그쪽은
-  design-system·ui-ux-design 스킬.
+  개성 있는 프로덕션급 프론트엔드 UI 의 미학 방향. TRIGGER when the user builds, designs, restyles, or asks for a
+  design direction/proposal for a landing page, product or marketing page, demo site, web page, component, or
+  artifact, dashboard, data platform or internal tool — even when they only want a plan or suggestion before code
+  (예: '제품 소개 페이지 어떤 방향으로 디자인할까', '데이터 플랫폼 화면 좀 고급스럽게'). 절차·lint 는 design-system.
 license: Complete terms in LICENSE.txt
 ---
 
 <!-- 출처: anthropics/skills skills/frontend-design @41bbe19 (2026-09-03, Apache-2.0, LICENSE.txt 동봉).
-     본문은 원문 그대로. 로컬 수정은 description(라우팅용, 원문은 범용이라 대시보드까지 가로챔)과 아래 「적용 범위」 블록뿐. -->
+     본문은 원문 그대로. 로컬 수정은 description(라우팅용)과 아래 「적용 범위」 블록뿐. -->
 
-> **[로컬 추가 — 원문 아님]** 적용 범위: 이 스킬의 "aesthetic risk · 히어로 연출 · 눈에 남는 한 가지"
-> 지침은 **제품 소개·랜딩·데모·아티팩트**용이다.
-> **운영자 대시보드·관제 화면·내부 도구에는 적용하지 않는다** — 그쪽은
-> `design-system`(척도·토큰·정밀함)과 `ui-ux-design`(정보구조·상태·알람)을 따른다.
-> 다만 "templated default 회피"(아래 calibration 목록의 tell, 의도적 폰트·색 선택, 계획→자기 비평 절차)는
-> **모든 화면에 적용된다.** 운영 콘솔용으로 옮긴 판은 `design-system` 「만드는 절차」·「AI 대시보드 tell」.
+> **[로컬 추가 — 원문 아님]** 적용 범위: 이 스킬의 미학 지침(aesthetic risk · 연출 · 눈에 남는 한 가지)은
+> **랜딩·소개·데모만이 아니라 제품 화면·데이터 플랫폼·대시보드·관제 화면·내부 도구까지 모든 UI 에 쓴다** (사용자 결정 2026-11-26).
+> 함께 지킬 것은 둘뿐: ① 실시간 값을 읽는 자리에서는 판독이 연출을 이긴다 ② 실기 로봇 화면이면 `design-system` 의
+> `references/operational-ui.md` 「안전 최소선」 2개. 정보구조·상태 설계는 `ui-ux-design` 과 같이 본다.
+> **절차(DESIGN.md 방향 문서 → 3a 컨셉 3개 → 3b → 렌더 비평 → lint)와 `design_lint.py` 검사는 `design-system` 을 따른다.**
+> 아래 원문의 미학 지침은 그 절차 안 1단계(방향)·3단계(시안)에서 쓴다.
 >
-> **`genjutsu:cast` / `genjutsu:paint`**(플러그인, 켜 두었다면)도 같은 범위에 속한다 — 모션 연출,
-> 3D(Three.js/R3F), 스크롤 인터랙션, 아트디렉션이 필요한 **소개·랜딩·데모**에 쓴다.
-> 관제 화면에 이것을 열면 `design-system` 이 자제하라고 명시한 방향과 정면으로 부딪힌다.
+> **`genjutsu:cast` / `genjutsu:paint`**(플러그인, 켜 두었다면) — 모션 연출, 3D(Three.js/R3F), 스크롤 인터랙션,
+> 아트디렉션이 필요할 때 화면 종류와 상관없이 쓸 수 있다. 오래 띄워 두는 화면이면 멈추는 수단을 둔다.
 
 # Frontend Design
 
