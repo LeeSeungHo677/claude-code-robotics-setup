@@ -18,7 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "lint-on-edit.py")
 FLAG, PASS = "flag", "pass"
 
-BAD = "import os\n\n\ndef f(x):\n    return x == None\n"      # F401 미사용 import, E711 None 비교
+BAD = "import os\n\n\ndef f(x):\n    y = 1\n    return x\n"      # F401 미사용 import, F841 미사용 지역 변수 (F 계열은 모든 ruff 버전의 기본 규칙)
 CLEAN = "def f(x):\n    return x + 1\n"
 
 
@@ -72,7 +72,7 @@ def main():
         on = project(tmp, "on", files={"pkg/bad.py": BAD, "pkg/clean.py": CLEAN, "notes.txt": BAD})
         bad = os.path.join(on, "pkg/bad.py")
         got, out = decide("Edit", bad)
-        check(FLAG, "opt-in + 위반 있는 .py (Edit) → 규칙 코드가 컨텍스트에", got, "F401" in out and "E711" in out)
+        check(FLAG, "opt-in + 위반 있는 .py (Edit) → 규칙 코드가 컨텍스트에", got, "F401" in out and "F841" in out)
         got, _ = decide("Write", bad)
         check(FLAG, "Write 도 대상", got)
         got, _ = decide("Edit", os.path.join(on, "pkg/clean.py"))
